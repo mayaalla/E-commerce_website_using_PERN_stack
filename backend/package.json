@@ -1,0 +1,48 @@
+{
+  "name": "e-commerce-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Express and TypeScript backend for the e-commerce project",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.2.0",
+    "@upstash/redis": "^1.40.0",
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.0.0",
+    "drizzle-orm": "^0.45.4",
+    "express": "^5.0.0",
+    "express-rate-limit": "^8.0.0",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "morgan": "^1.10.0",
+    "pg": "^8.23.1",
+    "pino-http": "^11.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/cookie-parser": "^1.4.0",
+    "@types/cors": "^2.8.0",
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.0",
+    "@types/morgan": "^1.9.0",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.0"
+  }
+}
