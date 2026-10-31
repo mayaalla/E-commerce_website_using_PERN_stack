@@ -112,6 +112,32 @@ export const validateId =
     next();
   };
 
+// ─────────────────────────────────────────────────────────────
+// WILAYA CODE PARAM VALIDATOR
+// Validates that a URL parameter is a 2-digit string (e.g. "01", "48").
+// Example usage: router.get("/:code", validateWilayaCode(), handler)
+// ─────────────────────────────────────────────────────────────
+export const validateWilayaCode =
+  (paramName = "code") =>
+  (req: Request, res: Response, next: NextFunction): void => {
+    const raw = req.params[paramName];
+
+    const parsed = z
+      .string()
+      .regex(/^\d{2}$/, `${paramName} must be exactly 2 digits (e.g. '01')`)
+      .safeParse(raw);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        errors: [`${paramName}: must be exactly 2 digits (e.g. '01')`],
+      });
+      return;
+    }
+
+    next();
+  };
+
 // ═════════════════════════════════════════════════════════════
 // ███  ADMIN VALIDATORS
 // ═════════════════════════════════════════════════════════════
