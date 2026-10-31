@@ -6,6 +6,13 @@ import cookieParser from 'cookie-parser';
 import { rateLimit } from 'express-rate-limit';
 import morgan from 'morgan';
 
+import categoryRouter from './router/category.router.js';
+import wilayaRouter from './router/wilaya.router.js';
+import communeRouter from './router/commune.router.js';
+import productRouter from './router/product.router.js';
+import couponRouter from './router/coupon.router.js';
+import orderRouter from './router/order.router.js';
+
 const app = express();
 
 app.disable('x-powered-by');
@@ -28,6 +35,16 @@ app.use(cookieParser());
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API Routes
+// ─────────────────────────────────────────────────────────────────────────────
+app.use('/api/categories', categoryRouter);
+app.use('/api/wilayas', wilayaRouter);
+app.use('/api/communes', communeRouter);
+app.use('/api/products', productRouter);
+app.use('/api/coupons', couponRouter);
+app.use('/api/orders', orderRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ message: 'Route not found' });
