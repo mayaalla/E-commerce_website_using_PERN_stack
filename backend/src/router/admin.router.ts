@@ -1,20 +1,46 @@
 import { Router } from "express";
-import app from "../app.js";
-
+import {
+  createAdmin,
+  getAdminById,
+  getAllAdmins,
+  updateAdminById,
+  deleteAdminById,
+} from "../controller/admin.controller.js";
+import {
+  validateCreateAdmin,
+  validateUpdateAdmin,
+  validateId,
+} from "../middleware/validation.js";
 
 const router = Router();
 
-// create admin
-app.post("/", (req, res) => {})
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admins
+// Validate body before reaching the controller.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/", validateCreateAdmin, createAdmin);
 
-// get admin
-app.get("/:id", (req, res) => {})
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admins
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/", getAllAdmins);
 
-// get all admins
-app.get("/", (req, res) => {})
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admins/:id
+// Validate :id is a positive integer before reaching the controller.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/:id", validateId(), getAdminById);
 
-// update admin
-app.put("/:id", (req, res) => {})
+// ─────────────────────────────────────────────────────────────────────────────
+// PUT /api/admins/:id
+// Validate :id and request body before reaching the controller.
+// ─────────────────────────────────────────────────────────────────────────────
+router.put("/:id", validateId(), validateUpdateAdmin, updateAdminById);
 
-// delete admin
-app.delete("/:id", (req, res) => {})
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/admins/:id
+// Validate :id before reaching the controller.
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete("/:id", validateId(), deleteAdminById);
+
+export default router;
