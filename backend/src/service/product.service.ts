@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "../db/db.js";
 import { products, categories } from "../db/schema.js";
+import { verifyAndConsumeToken, MAX_IMAGES_PER_PRODUCT } from "../utils/upload.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -26,6 +27,14 @@ export type CreateProductPayload = {
   /** Optional promotional price; must be >= 0 and <= price. */
   promo?: string;
   categoryId: number;
+  /** Optional Cloudinary upload confirmations. Each entry is verified server-side. */
+  imageUploads?: Array<{ publicId: string; version: number; signature: string }>;
+  /**
+   * The ID of the admin performing this action.
+   * Used to verify that each imageUpload token was issued to the same admin
+   * — preventing cross-admin token theft/reuse attacks.
+   */
+  adminId: number;
 };
 
 /** Payload accepted when updating an existing product.
@@ -79,12 +88,36 @@ export async function createProductService(
     sizes = [],
     promo,
     categoryId,
+    imageUploads,
+    adminId,
   } = payload;
 
   await assertCategoryExists(categoryId);
 
   if (promo !== undefined) {
     assertPromoValid(price, promo);
+  }
+
+  // Guard: never store more than MAX_IMAGES_PER_PRODUCT URLs on a product.
+  if (imageUploads && imageUploads.length > MAX_IMAGES_PER_PRODUCT) {
+    throw new Error(
+      `Too many images: a product may have at most ${MAX_IMAGES_PER_PRODUCT} images`
+    );
+  }
+
+  // Verify and consume each upload token → build secure_urls.
+  // verifyAndConsumeToken checks:
+  //   1. Token exists in Redis (was issued by us, hasn't expired or been used).
+  //   2. Token was issued to THIS admin (prevents cross-admin token theft).
+  //   3. Cloudinary response signature matches (proves the file was genuinely uploaded).
+  //   4. Deletes the token from Redis (one-time use, replay-proof).
+  let images: string[] = [];
+  if (imageUploads && imageUploads.length > 0) {
+    images = await Promise.all(
+      imageUploads.map(({ publicId, version, signature }) =>
+        verifyAndConsumeToken(publicId, version, signature, adminId)
+      )
+    );
   }
 
   const [newProduct] = await db
@@ -97,6 +130,7 @@ export async function createProductService(
       sizes,
       promo: promo ?? null,
       categoryId,
+      images,
     })
     .returning();
 
