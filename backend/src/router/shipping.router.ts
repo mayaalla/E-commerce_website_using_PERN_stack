@@ -1,18 +1,116 @@
+import { Router } from "express";
+import {
+  // Shipping Company
+  createShippingCompany,
+  getShippingCompanyById,
+  getAllShippingCompanies,
+  updateShippingCompanyById,
+  deleteShippingCompanyById,
+  // Shipping Price
+  createShippingPrice,
+  getShippingPriceById,
+  getShippingPriceByCompanyAndWilaya,
+  getAllShippingPricesForCompany,
+  updateShippingPriceById,
+  deleteShippingPriceById,
+} from "../controller/shipping.controller.js";
+import {
+  validateCreateShippingCompany,
+  validateUpdateShippingCompany,
+  validateCreateShippingPrice,
+  validateUpdateShippingPrice,
+  validateId,
+} from "../middleware/validation.js";
 
+const router = Router();
 
-// add shiping company 
+// ═════════════════════════════════════════════════════════════════════════════
+// ███  SHIPPING COMPANY ROUTES   /api/shipping/companies
+// ═════════════════════════════════════════════════════════════════════════════
 
-// add shipping price to a shipping company and wilaya
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/shipping/companies
+// Validate body before reaching the controller.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/companies", validateCreateShippingCompany, createShippingCompany);
 
-// get shipping company
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/shipping/companies
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/companies", getAllShippingCompanies);
 
-// get all shipping companies
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/shipping/companies/:id
+// Validate :id is a positive integer before reaching the controller.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/companies/:id", validateId(), getShippingCompanyById);
 
-// update shipping company
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/shipping/companies/:id/prices
+// Returns every wilaya price for one shipping company.
+// Must be declared BEFORE the generic /:id routes to avoid shadowing.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get(
+  "/companies/:id/prices",
+  validateId(),
+  getAllShippingPricesForCompany
+);
 
-// update shipping price of a shipping company and wilaya
+// ─────────────────────────────────────────────────────────────────────────────
+// PUT /api/shipping/companies/:id
+// Validate :id and request body before reaching the controller.
+// ─────────────────────────────────────────────────────────────────────────────
+router.put(
+  "/companies/:id",
+  validateId(),
+  validateUpdateShippingCompany,
+  updateShippingCompanyById
+);
 
-// delete shipping company
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/shipping/companies/:id
+// Validate :id before reaching the controller.
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete("/companies/:id", validateId(), deleteShippingCompanyById);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// ███  SHIPPING PRICE ROUTES   /api/shipping/prices
+// ═════════════════════════════════════════════════════════════════════════════
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/shipping/prices
+// Validate body before reaching the controller.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/prices", validateCreateShippingPrice, createShippingPrice);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/shipping/prices/lookup
+// Query-string lookup: ?companyId=1&wilayaCode=16 | ?companyName=X&wilayaName=Y
+// Must be declared BEFORE /:id so Express does not treat "lookup" as a param.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/prices/lookup", getShippingPriceByCompanyAndWilaya);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/shipping/prices/:id
+// Validate :id is a positive integer before reaching the controller.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/prices/:id", validateId(), getShippingPriceById);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUT /api/shipping/prices/:id
+// Validate :id and request body before reaching the controller.
+// ─────────────────────────────────────────────────────────────────────────────
+router.put(
+  "/prices/:id",
+  validateId(),
+  validateUpdateShippingPrice,
+  updateShippingPriceById
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/shipping/prices/:id
+// Validate :id before reaching the controller.
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete("/prices/:id", validateId(), deleteShippingPriceById);
+
+export default router;
