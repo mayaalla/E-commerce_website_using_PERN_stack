@@ -69,6 +69,16 @@ export const orderStatus = pgEnum("order_status", [
   "shipped",
 ]);
 
+export const shippingCompanyStatus = pgEnum("shipping_company_status", [
+  "active",
+  "inactive",
+]);
+
+export const shippingWilayaStatus = pgEnum("shipping_wilaya_status", [
+  "active",
+  "inactive",
+]);
+
 export const admins = pgTable("admins", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
@@ -91,6 +101,7 @@ export const products = pgTable(
     title: text("title").notNull(),
     description: text("description").notNull(),
     price: numeric("price", { precision: 12, scale: 2 }).notNull(),
+    images: text("images").array().notNull().default([]),
     colors: text("colors").array().notNull().default([]),
     sizes: clothingSize("sizes").array().notNull().default([]),
     // Optional discounted price, in the same currency as price.
@@ -112,6 +123,7 @@ export const shippingCompanies = pgTable("shipping_companies", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   hashedApiKey: text("hashed_api_key").notNull(),
+  status: shippingCompanyStatus("status").notNull().default("active"),
 });
 
 export const wilayas = pgTable("wilayas", {
@@ -131,6 +143,7 @@ export const shippingPrices = pgTable(
     shippingCompanyId: integer("shipping_company_id")
       .notNull()
       .references(() => shippingCompanies.id),
+    status: shippingWilayaStatus("status").notNull().default("active")
   },
   (table) => [
     unique("shipping_prices_company_wilaya_unique").on(

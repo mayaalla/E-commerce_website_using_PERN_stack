@@ -8,6 +8,27 @@
       "when": 1793387757031,
       "tag": "0000_quick_doctor_spectrum",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793465782538,
+      "tag": "0001_youthful_radioactive_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793466869367,
+      "tag": "0002_curvy_red_ghost",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793488809471,
+      "tag": "0003_talented_maestro",
+      "breakpoints": true
     }
   ]
 }
