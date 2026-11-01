@@ -26,6 +26,12 @@ const isNotFound = (err: unknown): boolean =>
 const isBusinessRuleViolation = (err: unknown): boolean =>
   err instanceof Error && /promo price/i.test(err.message);
 
+const isUploadVerificationFailure = (err: unknown): boolean =>
+  err instanceof Error &&
+  (/verification failed/i.test(err.message) ||
+    /token not found/i.test(err.message) ||
+    /too many images/i.test(err.message));
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/products
 // Body already validated by validateCreateProduct middleware.
@@ -44,6 +50,9 @@ export async function createProduct(
 ): Promise<void> {
   try {
     const payload = req.body as CreateProductPayload;
+    // Inject the authenticated admin's id so the service can verify that each
+    // upload token was issued to THIS admin (cross-admin token theft prevention).
+    payload.adminId = req.admin!.id;
     const product = await createProductService(payload);
 
     res.status(201).json({ success: true, data: product });
@@ -52,6 +61,9 @@ export async function createProduct(
       return next(createHttpError(404, (error as Error).message));
     }
     if (isBusinessRuleViolation(error)) {
+      return next(createHttpError(422, (error as Error).message));
+    }
+    if (isUploadVerificationFailure(error)) {
       return next(createHttpError(422, (error as Error).message));
     }
     next(error);
