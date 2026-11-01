@@ -1,11 +1,45 @@
+import type { Request, Response, NextFunction } from "express";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// authorize
+// Factory that returns an Express middleware which enforces that req.admin
+// holds a permission equal to the given string (or is a super_admin / holds
+// full_access, which bypasses all permission checks).
+// ─────────────────────────────────────────────────────────────────────────────
 
-// verify that the admin is authorized to perform the action get the id  from req.id
+export function authorize(permission: string) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    // ── Step 1: Ensure the request was authenticated first ───────────────
+    if (!req.admin) {
+      res
+        .status(401)
+        .json({ success: false, errors: ["Not authenticated"] });
+      return;
+    }
 
-// the input of this middleware will be permision that is string
-// if it is super admin, allow the action
-// if the admin has permission "full_access", allow the action
-// if the admin has permission that is equal to the input permission, allow the action
+    const { type, permissions } = req.admin;
 
-// if the admin is not authorized, return an error to the client
-// call next() to pass the control to the next middleware or route handler
+    // ── Step 2: Super admins bypass all permission checks ────────────────
+    if (type === "super_admin") {
+      next();
+      return;
+    }
+
+    // ── Step 3: full_access grants everything ────────────────────────────
+    if (permissions.includes("full_access")) {
+      next();
+      return;
+    }
+
+    // ── Step 4: Specific permission check ────────────────────────────────
+    if (permissions.includes(permission as (typeof permissions)[number])) {
+      next();
+      return;
+    }
+
+    // ── Step 5: Deny ─────────────────────────────────────────────────────
+    res
+      .status(403)
+      .json({ success: false, errors: ["Insufficient permissions"] });
+  };
+}
