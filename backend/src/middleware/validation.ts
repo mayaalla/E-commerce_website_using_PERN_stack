@@ -221,6 +221,23 @@ const createProductSchema = z.object({
     .number()
     .int("Category ID must be a whole number")
     .positive("Category ID must be positive"),
+
+  // Optional Cloudinary upload confirmations.
+  // Each entry is verified server-side before the product is inserted.
+  imageUploads: z
+    .array(
+      z.object({
+        publicId: z.string().min(1, "publicId is required"),
+        version: z
+          .number()
+          .int("version must be a whole number")
+          .positive("version must be positive"),
+        signature: z.string().min(1, "signature is required"),
+      })
+    )
+    .min(0)
+    .max(8, "At most 8 images are allowed per product")
+    .optional(),
 });
 
 // Schema for updating a product – every field becomes optional.
@@ -428,3 +445,45 @@ const updateOrderStatusSchema = z.object({
 
 export const validateCreateOrder = validate(createOrderSchema);
 export const validateUpdateOrderStatus = validate(updateOrderStatusSchema);
+
+// ═════════════════════════════════════════════════════════════
+// ███  IMAGE UPLOAD VALIDATORS
+// ═════════════════════════════════════════════════════════════
+
+const ALLOWED_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+] as const;
+
+const MAX_FILE_SIZE_BYTES = 5_242_880; // 5 MB
+const MAX_FILES = 8;
+
+// Schema for requesting upload tokens.
+// The client sends metadata about each file it wants to upload.
+const requestUploadTokensSchema = z.object({
+  files: z
+    .array(
+      z.object({
+        fileName: z
+          .string()
+          .trim()
+          .min(1, "File name is required")
+          .max(255, "File name must be at most 255 characters"),
+        mimeType: z.enum(ALLOWED_MIME_TYPES, {
+          error: `MIME type must be one of: ${ALLOWED_MIME_TYPES.join(", ")}`,
+        }),
+        size: z
+          .number()
+          .int("Size must be a whole number")
+          .positive("Size must be positive")
+          .max(MAX_FILE_SIZE_BYTES, "File size must not exceed 5 MB"),
+      })
+    )
+    .min(1, "At least one file is required")
+    .max(MAX_FILES, `At most ${MAX_FILES} files can be uploaded at once`),
+});
+
+export const validateRequestUploadTokens = validate(requestUploadTokensSchema);
+
