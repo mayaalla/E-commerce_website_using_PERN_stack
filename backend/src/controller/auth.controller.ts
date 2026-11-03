@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import {
+  getMeService,
   loginService,
   logoutService,
   refreshTokenService,
@@ -146,6 +147,45 @@ export async function refreshToken(
       clearRefreshTokenCookie(res);
       return next(createHttpError(401, error.message));
     }
+    next(error);
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/auth/me
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the safe profile of the currently authenticated admin.
+ *
+ * The `authenticate` middleware runs first; it verifies the token, checks the
+ * block-list, fetches the admin row from the DB, and attaches it to `req.admin`.
+ * This handler's only job is to pick the safe fields and send them back.
+ * The password / password hash is never included.
+ */
+export async function getMe(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    // Safety net: `authenticate` should always populate req.admin before we
+    // reach here. If it is somehow missing, return the same 401 shape used
+    // everywhere else in this codebase.
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        errors: ["Unauthorized"],
+      });
+      return;
+    }
+
+    // Pick only the safe fields – never expose the password hash.
+    const data = getMeService(req.admin);
+
+    res.status(200).json({ success: true, data });
+  } catch (error) {
     next(error);
   }
 }
