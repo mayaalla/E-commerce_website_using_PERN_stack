@@ -11,16 +11,17 @@
 ## Table of Contents
 
 1. [Common Patterns](#common-patterns)
-2. [Auth](#auth)
-3. [Admins](#admins)
-4. [Categories](#categories)
-5. [Products](#products)
-6. [Wilayas](#wilayas)
-7. [Communes](#communes)
-8. [Shipping](#shipping)
-9. [Coupons](#coupons)
-10. [Orders](#orders)
-11. [Health Check](#health-check)
+2. [Middleware](#middleware)
+3. [Auth](#auth)
+4. [Admins](#admins)
+5. [Categories](#categories)
+6. [Products](#products)
+7. [Wilayas](#wilayas)
+8. [Communes](#communes)
+9. [Shipping](#shipping)
+10. [Coupons](#coupons)
+11. [Orders](#orders)
+12. [Health Check](#health-check)
 
 ---
 
@@ -58,6 +59,136 @@
 | `couponStatus` | `active`, `inactive`, `expired` |
 | `shippingCompanyStatus` | `active`, `inactive` |
 | `shippingWilayaStatus` | `active`, `inactive` |
+
+---
+
+## Middleware
+
+These three middleware modules sit between the router and every controller. They are imported and composed in each route file.
+
+---
+
+### `authenticate`
+
+**File:** `backend/src/middleware/authentication.ts`
+
+Verifies the caller's identity on every protected route. Must run **before** `authorize`.
+
+**How it works (in order):**
+
+| Step | Action | Failure response |
+|---|---|---|
+| 1 | Extract `Authorization: Bearer <token>` header | `401 No token provided` |
+| 2 | Verify JWT signature + expiry with `verifyAccessToken()` | `401 Invalid or expired token` |
+| 3 | Check the token against the revocation block-list (`isAccessTokenBlocked()`) | `401 Token has been revoked` |
+| 4 | Fetch the matching admin row from the database | `401 Admin not found` |
+| 5 | Attach the admin record to `req.admin` and call `next()` | — |
+
+**Usage**
+
+```ts
+router.post("/logout", authenticate, logoutHandler);
+```
+
+> The middleware augments the Express `Request` type globally so `req.admin` is typed as the full admin DB row everywhere downstream.
+
+---
+
+### `authorize(permission)`
+
+**File:** `backend/src/middleware/authirization.ts`
+
+Factory that returns a middleware enforcing a specific permission. **Must be placed after `authenticate`** (it reads `req.admin`).
+
+**Permission resolution order:**
+
+| Priority | Condition | Result |
+|---|---|---|
+| 1 | `req.admin` is missing | `401 Not authenticated` |
+| 2 | `req.admin.type === "super_admin"` | ✅ Always allowed |
+| 3 | `req.admin.permissions` includes `"full_access"` | ✅ Always allowed |
+| 4 | `req.admin.permissions` includes the required `permission` | ✅ Allowed |
+| 5 | None of the above | `403 Insufficient permissions` |
+
+**Usage**
+
+```ts
+router.post("/products", authenticate, authorize("product_management"), createProductHandler);
+```
+
+**Permission values** (`adminPermission` enum):
+
+| Value | Grants access to |
+|---|---|
+| `product_management` | Create / update / delete products & upload tokens |
+| `order_management` | Update order status, delete orders |
+| `coupon_management` | Create / update / delete coupons |
+| `shipping_management` | Manage shipping companies and prices |
+| `full_access` | Everything (equivalent to `super_admin`) |
+
+---
+
+### `validate(schema)` — Body Validation
+
+**File:** `backend/src/middleware/validation.ts`
+
+Generic Zod-powered middleware factory. Parses `req.body` against a Zod schema; on success it **replaces `req.body`** with the cleaned/transformed data and calls `next()`. On failure it short-circuits with a `400`.
+
+**Error response shape (400)**
+
+```json
+{
+  "success": false,
+  "errors": ["field: message", "other.field: message"]
+}
+```
+
+**Usage**
+
+```ts
+import { validate } from "../middleware/validation.js";
+import { z } from "zod";
+
+const mySchema = z.object({ name: z.string().min(1) });
+router.post("/example", validate(mySchema), handler);
+```
+
+#### Pre-built body validators
+
+Every route that mutates data uses one of these exported validators (all built on top of `validate()`):
+
+| Exported validator | Route(s) used on |
+|---|---|
+| `validateAdminLogin` | `POST /auth/login` |
+| `validateCreateAdmin` | `POST /admins` |
+| `validateUpdateAdmin` | `PUT /admins/:id` |
+| `validateCategory` | `POST /categories`, `PUT /categories/:id` |
+| `validateCreateProduct` | `POST /products` |
+| `validateUpdateProduct` | `PUT /products/:id` |
+| `validateRequestUploadTokens` | `POST /products/upload/request-tokens` |
+| `validateCreateWilaya` | `POST /wilayas` |
+| `validateUpdateWilaya` | `PUT /wilayas/:code` |
+| `validateCreateCommune` | `POST /communes` |
+| `validateUpdateCommune` | `PUT /communes/:id` |
+| `validateCreateShippingCompany` | `POST /shipping/companies` |
+| `validateUpdateShippingCompany` | `PUT /shipping/companies/:id` |
+| `validateCreateShippingPrice` | `POST /shipping/prices` |
+| `validateUpdateShippingPrice` | `PUT /shipping/prices/:id` |
+| `validateCreateCoupon` | `POST /coupons` |
+| `validateUpdateCoupon` | `PUT /coupons/:id` |
+| `validateCreateOrder` | `POST /orders` |
+| `validateUpdateOrderStatus` | `PATCH /orders/:id/status` |
+
+#### URL parameter validators
+
+Two additional middleware factories validate URL params instead of the body:
+
+| Factory | Default param | Validates |
+|---|---|---|
+| `validateId(paramName?)` | `"id"` | Positive integer (e.g. `/admins/:id`) |
+| `validateWilayaCode(paramName?)` | `"code"` | Exactly 2 digits (e.g. `/wilayas/:code`) |
+
+Both respond with `400 { success: false, errors: ["<param>: must be ..."] }` on failure.
 
 ---
 
@@ -107,6 +238,43 @@ Log out the current admin. Revokes both tokens.
 ```json
 { "success": true, "message": "Logged out successfully" }
 ```
+
+---
+
+### GET `/auth/me`
+
+Return the profile of the currently authenticated admin.
+
+> 🔒 Requires: `Authorization: Bearer <accessToken>` header.
+
+**Request** — no body, no params, no query string.
+
+**Response `200`**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "username": "admin1",
+    "phoneNumber": "0555000000",
+    "permissions": ["product_management", "order_management"],
+    "type": "regular_admin"
+  }
+}
+```
+
+> ⚠️ `password` is never returned.
+
+**Errors**
+
+| Status | Message |
+|---|---|
+| `401` | `No token provided` |
+| `401` | `Invalid or expired token` |
+| `401` | `Token has been revoked` |
+| `401` | `Admin not found` |
+| `401` | `Unauthorized` |
 
 ---
 
