@@ -112,3 +112,27 @@ export async function refreshTokenService(
   return { accessToken, refreshToken };
 }
 
+
+
+export type AdminProfile = Pick<
+  typeof admins.$inferSelect,
+  "id" | "username" | "phoneNumber" | "permissions" | "type"
+>;
+
+/**
+ * Extracts the safe profile fields from the admin row that `authenticate`
+ * already loaded and attached to `req.admin`.
+ *
+ * No extra DB round-trip is needed here; the middleware already did that work.
+ */
+export function getMeService(
+  admin: typeof admins.$inferSelect
+): AdminProfile {
+  return {
+    id: admin.id,
+    username: admin.username,
+    phoneNumber: admin.phoneNumber,
+    permissions: admin.permissions,
+    type: admin.type,
+  };
+}
