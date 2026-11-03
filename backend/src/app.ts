@@ -13,6 +13,7 @@ import productRouter from './router/product.router.js';
 import couponRouter from './router/coupon.router.js';
 import orderRouter from './router/order.router.js';
 import shippingRouter from './router/shipping.router.js';
+import authRouter from './router/auth.router.js';
 
 const app = express();
 
@@ -47,6 +48,7 @@ app.use('/api/products', productRouter);
 app.use('/api/coupons', couponRouter);
 app.use('/api/orders', orderRouter);
 app.use('/api/shipping', shippingRouter);
+app.use('/api/auth', authRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ message: 'Route not found' });
