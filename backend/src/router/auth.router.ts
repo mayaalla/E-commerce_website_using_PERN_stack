@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { login, logout, refreshToken } from "../controller/auth.controller.js";
+import { login, logout, refreshToken, getMe } from "../controller/auth.controller.js";
+import { authenticate } from "../middleware/authentication.js";
 import { validateAdminLogin } from "../middleware/validation.js";
 
 const router = Router();
@@ -21,5 +22,8 @@ router.post("/logout", logout);
 // Reads the refresh token from the HTTP-only cookie set at login.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/refresh-token", refreshToken);
+
+
+router.get("/me", authenticate, getMe);
 
 export default router;
