@@ -1,14 +1,6 @@
 import { create } from "zustand";
+import { AuthState } from "../types";
 
-
-interface AuthState {
-  accessToken: string | null;
-  status: "checking" | "authenticated" | "unauthenticated";
-
-  setAccessToken: (token: string | null) => void;
-  setStatus: (status: AuthState["status"]) => void;
-  logout: () => void;
-}
 
 const useAuthStore = create<AuthState>((set) => ({
   accessToken: null,
