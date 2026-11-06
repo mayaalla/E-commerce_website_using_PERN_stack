@@ -5,7 +5,7 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   success: boolean;
-  usertoken: string;
+ accessToken: string;
 }
 
 export interface LogoutResponse {
@@ -15,13 +15,13 @@ export interface LogoutResponse {
 
 export interface RefreshTokenResponse {
     success: boolean;
-    usertoken: string;
+    accessToken: string;
 }
 
 
 export interface MeResponse {
     success: boolean;
-    user: {
+    data: {
         id: number;
         username: string;
         phoneNumber: string;      
