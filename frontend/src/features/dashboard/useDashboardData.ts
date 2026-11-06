@@ -1,0 +1,56 @@
+import { useQueries } from "@tanstack/react-query";
+import {
+  fetchOrders,
+  fetchProducts,
+  fetchCategories,
+  fetchWilayas,
+  fetchShippingCompanies,
+  fetchShippingPrices,
+  fetchCoupons,
+  fetchMe,
+} from "./api";
+import type { DashboardData } from "./types";
+
+const STALE = 60_000; // 1 minute
+
+export function useDashboardData(): DashboardData {
+  const results = useQueries({
+    queries: [
+      { queryKey: ["dashboard", "orders"],            queryFn: fetchOrders,            staleTime: STALE },
+      { queryKey: ["dashboard", "products"],          queryFn: fetchProducts,          staleTime: STALE },
+      { queryKey: ["dashboard", "categories"],        queryFn: fetchCategories,        staleTime: STALE },
+      { queryKey: ["dashboard", "wilayas"],           queryFn: fetchWilayas,           staleTime: STALE },
+      { queryKey: ["dashboard", "shippingCompanies"], queryFn: fetchShippingCompanies, staleTime: STALE },
+      { queryKey: ["dashboard", "shippingPrices"],    queryFn: fetchShippingPrices,    staleTime: STALE },
+      { queryKey: ["dashboard", "coupons"],           queryFn: fetchCoupons,           staleTime: STALE },
+      { queryKey: ["dashboard", "me"],                queryFn: fetchMe,                staleTime: Infinity },
+    ],
+  });
+
+  const [
+    ordersQ,
+    productsQ,
+    categoriesQ,
+    wilayasQ,
+    companiesQ,
+    pricesQ,
+    couponsQ,
+    meQ,
+  ] = results;
+
+  const isLoading = results.some((r) => r.isLoading);
+  const isError   = results.some((r) => r.isError);
+
+  return {
+    orders:            ordersQ.data?.data           ?? [],
+    products:          productsQ.data?.data         ?? [],
+    categories:        categoriesQ.data?.data       ?? [],
+    wilayas:           wilayasQ.data?.data          ?? [],
+    shippingCompanies: companiesQ.data?.data        ?? [],
+    shippingPrices:    pricesQ.data?.data           ?? [],
+    coupons:           couponsQ.data?.data          ?? [],
+    admin:             meQ.data?.data               ?? null,
+    isLoading,
+    isError,
+  };
+}
