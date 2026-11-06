@@ -1,7 +1,4 @@
+// App.jsx is intentionally minimal — routing is handled by router.tsx
 export default function App() {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <h1 className="text-3xl font-bold text-gray-900">E-commerce</h1>
-    </div>
-  )
+  return null;
 }
