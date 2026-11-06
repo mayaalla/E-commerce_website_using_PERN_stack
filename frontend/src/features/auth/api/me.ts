@@ -1,11 +1,11 @@
-import api from "@/lib/axios";
+import { apiClient } from "@/lib/api-client";
 import { MeResponse } from "../types";
 import { AxiosError } from "axios";
 
 
 export const me = async (): Promise<MeResponse> => {
     try {
-        const response = await api.get<MeResponse>("/auth/me");
+        const response = await apiClient.get<MeResponse>("/auth/me");
         return response.data;
     } catch (error) {
         if (error instanceof AxiosError) {
