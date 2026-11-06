@@ -180,9 +180,12 @@ export async function saveRefreshTokenToRedis(
 export async function getRefreshTokenFromRedis(
   adminId: number
 ): Promise<StoredRefreshToken | null> {
-  const raw = await redis.get<string>(refreshTokenKey(adminId));
-  if (!raw) return null;
-  return JSON.parse(raw) as StoredRefreshToken;
+  // Upstash Redis automatically deserializes JSON values, so the value comes
+  // back as a plain object — NOT a string.  Using redis.get<StoredRefreshToken>
+  // gets the correct type and skips the JSON.parse() that was crashing with
+  // "SyntaxError: [object Object] is not valid JSON".
+  const record = await redis.get<StoredRefreshToken>(refreshTokenKey(adminId));
+  return record ?? null;
 }
 
 /**
