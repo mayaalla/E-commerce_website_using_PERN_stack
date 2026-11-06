@@ -40,7 +40,11 @@ apiClient.interceptors.response.use(
   (res) => res,
   async (error: AxiosError) => {
     const original = error.config as Retriable | undefined;
-    const isAuthRoute = original?.url?.startsWith('/auth/');
+    // Only skip the refresh for routes that ARE the auth handshake themselves.
+    // Do NOT skip /auth/me — that is the session-restore call that NEEDS the refresh.
+    const isAuthRoute = original?.url === '/auth/login'
+                     || original?.url === '/auth/logout'
+                     || original?.url === '/auth/refresh-token';
 
     if (error.response?.status === 401 && original && !original._retry && !isAuthRoute) {
       original._retry = true;
