@@ -1,6 +1,10 @@
-let accessToken: string | null = null;
+let token : string | null = null;
+
+
 
 export const tokenStore = {
-  get: () => accessToken,
-  set: (token: string | null) => { accessToken = token; },
+  get: () => token,
+  set: (newToken: string | null) => { token = newToken; },
 };
+
+
