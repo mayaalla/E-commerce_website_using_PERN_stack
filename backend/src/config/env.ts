@@ -17,9 +17,7 @@ const envSchema = z.object({
     // SMTP_HOST: z.string().min(1).optional(),
     // RESEND_API_KEY: z.string().min(1).optional(),
     // EMAIL_FROM: z.string().min(1).optional(),
-    CLOUDINARY_CLOUD_NAME: z.string().min(1),
-    CLOUDINARY_API_KEY: z.string().min(1),
-    CLOUDINARY_API_SECRET: z.string().min(1),
+    CLOUDINARY_URL: z.string().url(),
 });
 
 const env = envSchema.safeParse(process.env);
