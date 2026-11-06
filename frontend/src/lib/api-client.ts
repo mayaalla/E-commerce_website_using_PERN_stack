@@ -3,14 +3,17 @@ import { env } from '@/config/env';
 import { tokenStore } from './auth-token';
 import { toApiError } from './api-error';
 
-export const api = axios.create({
+
+
+
+export const apiClient = axios.create({
   baseURL: env.API_URL,
   withCredentials: true,            // sends the refreshToken cookie
   headers: { 'Content-Type': 'application/json' },
 });
 
 // 1) Attach the access token to every request
-api.interceptors.request.use((config) => {
+apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = tokenStore.get();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
@@ -33,7 +36,7 @@ async function refreshAccessToken(): Promise<string> {
 
 type Retriable = InternalAxiosRequestConfig & { _retry?: boolean };
 
-api.interceptors.response.use(
+apiClient.interceptors.response.use(
   (res) => res,
   async (error: AxiosError) => {
     const original = error.config as Retriable | undefined;
@@ -46,7 +49,7 @@ api.interceptors.response.use(
         refreshPromise ??= refreshAccessToken().finally(() => { refreshPromise = null; });
         const token = await refreshPromise;
         original.headers.Authorization = `Bearer ${token}`;
-        return api(original);
+        return apiClient(original);
       } catch {
         tokenStore.set(null);
         onSessionExpired?.();       // the app decides: redirect to /login
