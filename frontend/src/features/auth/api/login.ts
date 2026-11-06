@@ -1,11 +1,11 @@
-import api from "@/lib/axios";
+import { apiClient } from "@/lib/api-client";
 import { LoginRequest, LoginResponse} from "../types";
 import { AxiosError } from "axios";
 
 export const login = async (data: LoginRequest): Promise<LoginResponse> => {
 
     try {
-        const response = await api.post<LoginResponse>("/auth/login", data);
+        const response = await apiClient.post<LoginResponse>("/auth/login", data);
         return response.data;
     } catch (error) {
         if (error instanceof AxiosError) {
