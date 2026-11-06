@@ -1,10 +1,10 @@
-import api from "@/lib/axios";
+import { apiClient } from "@/lib/api-client";
 import { RefreshTokenResponse } from "../types";
 import { AxiosError } from "axios";
 
 export const refreshToken = async (): Promise<RefreshTokenResponse> => {
 try{
-    const response = await api.post<RefreshTokenResponse>("/auth/refresh-token");
+    const response = await apiClient.post<RefreshTokenResponse>("/auth/refresh-token");
     return response.data;
 }catch (error) {
     if (error instanceof AxiosError) {
