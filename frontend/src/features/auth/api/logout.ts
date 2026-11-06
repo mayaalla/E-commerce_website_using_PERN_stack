@@ -1,4 +1,4 @@
-import api from "@/lib/axios";
+import { apiClient } from "@/lib/api-client";
 import { LogoutResponse } from "../types";
 import { AxiosError } from "axios";
 
@@ -8,7 +8,7 @@ export const logout = async (): Promise<LogoutResponse> => {
 //   return response.data;
 
     try {
-        const response = await api.post<LogoutResponse>("/auth/logout");
+        const response = await apiClient.post<LogoutResponse>("/auth/logout");
         return response.data;
     } catch (error) {
         if (error instanceof AxiosError) {
