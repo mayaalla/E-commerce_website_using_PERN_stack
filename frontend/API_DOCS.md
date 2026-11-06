@@ -404,6 +404,7 @@ Delete an admin and return their last snapshot.
 
 ---
 
+
 ## Categories
 
 ### POST `/categories`
