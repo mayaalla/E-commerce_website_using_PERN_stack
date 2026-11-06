@@ -1,28 +1,17 @@
 import { apiClient } from "@/lib/api-client";
 import { MeResponse } from "../types";
-import { AxiosError } from "axios";
 
-
+/**
+ * Fetch the current admin profile.
+ *
+ * We intentionally do NOT wrap this in a try/catch so that the
+ * api-client response interceptor can intercept any 401, silently
+ * refresh the access token via the HttpOnly cookie, and retry the
+ * request — which is what restores the session on a hard page reload.
+ */
 export const me = async (): Promise<MeResponse> => {
-    try {
-        const response = await apiClient.get<MeResponse>("/auth/me");
-        return response.data;
-    } catch (error) {
-        if (error instanceof AxiosError) {
-            if (error.response) {
-                // Handle the error response from the server
-                const status = error.response.status;
-                const message = error.response.data?.message || "An error occurred while fetching user data.";
-                throw new Error(`Fetching user data failed with status ${status}: ${message}`);
-            } else {
-                // Handle network or other errors
-                throw new Error("Network error occurred while fetching user data.");
-            }
-        } else {
-            // Handle unexpected errors
-            throw new Error("An unexpected error occurred while fetching user data.");
-        }
-    }
+  const response = await apiClient.get<MeResponse>("/auth/me");
+  return response.data;
 };
 
 
