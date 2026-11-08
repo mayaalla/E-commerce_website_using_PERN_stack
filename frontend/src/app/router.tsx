@@ -4,7 +4,7 @@ import { createBrowserRouter, RouterProvider, Outlet } from "react-router-dom";
 import Auth            from "@/pages/Auth";
 import HomePage        from "@/pages/Home";
 import CategoriesPage  from "@/pages/Categories";
-// import ProductsPage    from "@/pages/Products";
+import ProductsPage    from "@/pages/Products";
 // import OrdersPage      from "@/pages/Orders";
 // import CouponsPage     from "@/pages/Coupons";
 // import ShippingsPage   from "@/pages/Shippings";
@@ -46,7 +46,7 @@ const router = createBrowserRouter([
           // Home dashboard
           { index: true, element: <HomePage /> },
           { path: "/",   element: <HomePage /> },
-          // { path: "/products",  element: <ProductsPage /> },
+          { path: "/products",  element: <ProductsPage /> },
           { path: "/categories",element: <CategoriesPage /> },
           // { path: "/orders",    element: <OrdersPage /> },
           // { path: "/coupons",   element: <CouponsPage /> },
