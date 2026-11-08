@@ -53,7 +53,7 @@
 | Enum | Values |
 |---|---|
 | `adminType` | `super_admin`, `regular_admin` |
-| `adminPermission` | `product_management`, `order_management`, `coupon_management`, `shipping_management`, `full_access` |
+| `adminPermission` | `product_read`, `product_add`, `product_update`, `product_delete`, `category_read`, `category_add`, `category_update`, `category_delete`, `order_read`, `order_add`, `order_update`, `order_delete`, `coupon_read`, `coupon_add`, `coupon_update`, `coupon_delete`, `shipping_read`, `shipping_add`, `shipping_update`, `shipping_delete`, `shipping_company_read`, `shipping_company_add`, `shipping_company_update`, `shipping_company_delete`, `full_access` |
 | `clothingSize` | `34`, `36`, `38`, `40`, `42`, `44`, `46`, `48` |
 | `orderStatus` | `confirmed`, `pending`, `canceled`, `returned`, `shipped` |
 | `couponStatus` | `active`, `inactive`, `expired` |
@@ -113,17 +113,37 @@ Factory that returns a middleware enforcing a specific permission. **Must be pla
 **Usage**
 
 ```ts
-router.post("/products", authenticate, authorize("product_management"), createProductHandler);
+router.post("/products", authenticate, authorize("product_add"), createProductHandler);
 ```
 
 **Permission values** (`adminPermission` enum):
 
 | Value | Grants access to |
 |---|---|
-| `product_management` | Create / update / delete products & upload tokens |
-| `order_management` | Update order status, delete orders |
-| `coupon_management` | Create / update / delete coupons |
-| `shipping_management` | Manage shipping companies and prices |
+| `product_read` | Read/list products |
+| `product_add` | Create products & request upload tokens |
+| `product_update` | Update products |
+| `product_delete` | Delete products |
+| `category_read` | Read/list categories |
+| `category_add` | Create categories |
+| `category_update` | Update categories |
+| `category_delete` | Delete categories |
+| `order_read` | Read/list orders |
+| `order_add` | Create orders |
+| `order_update` | Update order status |
+| `order_delete` | Delete orders |
+| `coupon_read` | Read/list coupons |
+| `coupon_add` | Create coupons |
+| `coupon_update` | Update coupons |
+| `coupon_delete` | Delete coupons |
+| `shipping_read` | Read shipping companies and prices |
+| `shipping_add` | Create shipping prices |
+| `shipping_update` | Update shipping prices |
+| `shipping_delete` | Delete shipping prices |
+| `shipping_company_read` | Read shipping companies |
+| `shipping_company_add` | Create shipping companies |
+| `shipping_company_update` | Update shipping companies |
+| `shipping_company_delete` | Delete shipping companies |
 | `full_access` | Everything (equivalent to `super_admin`) |
 
 ---
@@ -258,7 +278,7 @@ Return the profile of the currently authenticated admin.
     "id": 1,
     "username": "admin1",
     "phoneNumber": "0555000000",
-    "permissions": ["product_management", "order_management"],
+    "permissions": ["product_add", "order_read"],
     "type": "regular_admin"
   }
 }
@@ -314,7 +334,7 @@ Create a new admin account.
   "username": "string (3–50 chars, no spaces, required)",
   "password": "string (min 8 chars, ≥1 uppercase, ≥1 digit, required)",
   "phoneNumber": "string (10 digits, starts with 0, required)",
-  "permissions": ["product_management", "order_management"],
+  "permissions": ["product_add", "product_update", "order_read"],
   "type": "regular_admin"
 }
 ```
@@ -330,7 +350,7 @@ Create a new admin account.
     "id": 1,
     "username": "admin1",
     "phoneNumber": "0555000000",
-    "permissions": ["product_management"],
+    "permissions": ["product_add"],
     "type": "regular_admin"
   }
 }
@@ -487,9 +507,11 @@ Request signed Cloudinary upload tokens before uploading images.
   "success": true,
   "data": [
     {
-      "uploadUrl": "https://api.cloudinary.com/...",
-      "token": "...",
-      "publicId": "products/abc123"
+      "publicId": "products/abc123-uuid",
+      "signature": "sha1hexhash",
+      "timestamp": 1699876543,
+      "apiKey": "699178484225616",
+      "cloudName": "dwrdmevki"
     }
   ]
 }
