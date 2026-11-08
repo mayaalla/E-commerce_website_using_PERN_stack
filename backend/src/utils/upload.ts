@@ -105,15 +105,19 @@ export async function verifyAndConsumeToken(
   adminId: number
 ): Promise<string> {
   // ── Step 1: Token must exist in Redis ────────────────────────────────────
-  const raw = await redis.get<string>(uploadTokenKey(publicId));
-  if (!raw) {
+  // Upstash Redis auto-deserializes stored JSON, so type the generic as the
+  // actual object shape rather than `string` to avoid a redundant JSON.parse
+  // that would receive "[object Object]" and throw a SyntaxError.
+  const stored = await redis.get<{ issuedAt: number; adminId: number }>(
+    uploadTokenKey(publicId)
+  );
+  if (!stored) {
     throw new Error(
       `Upload verification failed: token not found or expired for publicId "${publicId}"`
     );
   }
 
   // ── Step 2: Cross-admin reuse guard ──────────────────────────────────────
-  const stored = JSON.parse(raw) as { issuedAt: number; adminId: number };
   if (stored.adminId !== adminId) {
     // Consume the token immediately to prevent further probing.
     await redis.del(uploadTokenKey(publicId));
