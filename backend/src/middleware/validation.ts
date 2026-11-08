@@ -240,8 +240,12 @@ const createProductSchema = z.object({
     .optional(),
 });
 
-// Schema for updating a product – every field becomes optional.
-const updateProductSchema = createProductSchema.partial();
+// Schema for updating a product.
+// All fields are optional (patch semantics).
+// `promo` can additionally be null to explicitly clear an existing promo price.
+const updateProductSchema = createProductSchema.partial().extend({
+  promo: z.union([moneySchema, z.null()]).optional(),
+});
 
 export const validateCreateProduct = validate(createProductSchema);
 export const validateUpdateProduct = validate(updateProductSchema);
