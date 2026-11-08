@@ -407,7 +407,8 @@ export default function HomePage() {
     categories,
     wilayas,
     shippingCompanies,
-    shippingPrices,
+    // TODO: shipping prices — endpoint GET /api/shipping/prices not yet implemented on the backend
+    // shippingPrices,
     coupons,
     admin,
     isLoading,
@@ -480,8 +481,9 @@ export default function HomePage() {
     [orders]
   );
   const warnings = useMemo(
-    () => computeSetupWarnings(orders, shippingCompanies, shippingPrices, coupons, wilayas),
-    [orders, shippingCompanies, shippingPrices, coupons, wilayas]
+    // TODO: shipping prices — shippingPrices arg removed until GET /api/shipping/prices is implemented on the backend
+    () => computeSetupWarnings(orders, shippingCompanies, coupons, wilayas),
+    [orders, shippingCompanies, coupons, wilayas]
   );
 
   // ── Breakdowns ────────────────────────────────────────────────────────────
@@ -584,7 +586,7 @@ export default function HomePage() {
           isLoading={isLoading}
         />
         <KpiCard
-          label="Cancel + Return Rate"
+          label="Return Rate"
           value={`${(kpis.cancelReturnRate * 100).toFixed(1)}%`}
           pct={pctChange(kpis.cancelReturnRate, kpis.cancelReturnRatePrev)}
           inverseGood
