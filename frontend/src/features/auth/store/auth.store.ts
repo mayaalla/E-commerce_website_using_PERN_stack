@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { AuthState } from "../types";
+import { tokenStore } from "@/lib/auth-token";
 
 
 const useAuthStore = create<AuthState>((set) => ({
