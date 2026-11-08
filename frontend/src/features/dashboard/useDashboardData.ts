@@ -5,7 +5,8 @@ import {
   fetchCategories,
   fetchWilayas,
   fetchShippingCompanies,
-  fetchShippingPrices,
+  // TODO: shipping prices — endpoint GET /api/shipping/prices not yet implemented on the backend
+  // fetchShippingPrices,
   fetchCoupons,
   fetchMe,
 } from "./api";
@@ -21,7 +22,8 @@ export function useDashboardData(): DashboardData {
       { queryKey: ["dashboard", "categories"],        queryFn: fetchCategories,        staleTime: STALE },
       { queryKey: ["dashboard", "wilayas"],           queryFn: fetchWilayas,           staleTime: STALE },
       { queryKey: ["dashboard", "shippingCompanies"], queryFn: fetchShippingCompanies, staleTime: STALE },
-      { queryKey: ["dashboard", "shippingPrices"],    queryFn: fetchShippingPrices,    staleTime: STALE },
+      // TODO: shipping prices — endpoint GET /api/shipping/prices not yet implemented on the backend
+      // { queryKey: ["dashboard", "shippingPrices"],    queryFn: fetchShippingPrices,    staleTime: STALE },
       { queryKey: ["dashboard", "coupons"],           queryFn: fetchCoupons,           staleTime: STALE },
       { queryKey: ["dashboard", "me"],                queryFn: fetchMe,                staleTime: Infinity },
     ],
@@ -33,7 +35,7 @@ export function useDashboardData(): DashboardData {
     categoriesQ,
     wilayasQ,
     companiesQ,
-    pricesQ,
+    // pricesQ,  // TODO: shipping prices
     couponsQ,
     meQ,
   ] = results;
@@ -47,7 +49,8 @@ export function useDashboardData(): DashboardData {
     categories:        categoriesQ.data?.data       ?? [],
     wilayas:           wilayasQ.data?.data          ?? [],
     shippingCompanies: companiesQ.data?.data        ?? [],
-    shippingPrices:    pricesQ.data?.data           ?? [],
+    // TODO: shipping prices — endpoint GET /api/shipping/prices not yet implemented on the backend
+    shippingPrices:    /* pricesQ.data?.data ?? */ [],
     coupons:           couponsQ.data?.data          ?? [],
     admin:             meQ.data?.data               ?? null,
     isLoading,

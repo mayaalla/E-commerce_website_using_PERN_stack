@@ -11,7 +11,8 @@ import type {
   ColorCount,
   SetupWarning,
   ShippingCompany,
-  ShippingPrice,
+  // TODO: shipping prices — endpoint GET /api/shipping/prices not yet implemented on the backend
+  // ShippingPrice,
   Coupon,
   Wilaya,
   Product,
@@ -310,7 +311,8 @@ export function computeColors(orders: Order[]): ColorCount[] {
 export function computeSetupWarnings(
   orders: Order[],
   shippingCompanies: ShippingCompany[],
-  shippingPrices: ShippingPrice[],
+  // TODO: shipping prices — endpoint GET /api/shipping/prices not yet implemented on the backend
+  // shippingPrices: ShippingPrice[],
   coupons: Coupon[],
   wilayas: Wilaya[]
 ): SetupWarning[] {
@@ -331,25 +333,26 @@ export function computeSetupWarnings(
     });
   }
 
+  // TODO: shipping prices — re-enable once GET /api/shipping/prices is implemented on the backend
   // Wilayas covered by orders but missing a price for active companies
-  const orderedWilayas = new Set(orders.filter(isValid).map((o) => String(o.wilayaCode)));
-  const wilayaMap = new Map(wilayas.map((w) => [String(w.code), w.name]));
-  const coveredPairs = new Set(
-    shippingPrices.map((p) => `${p.wilayaCode}:${p.shippingCompanyId}`)
-  );
-
-  for (const code of orderedWilayas) {
-    for (const company of activeCompanies) {
-      const key = `${code}:${company.id}`;
-      if (!coveredPairs.has(key)) {
-        warnings.push({
-          type: "missing_shipping_price",
-          label: `Missing shipping price`,
-          detail: `No price set for ${wilayaMap.get(code) ?? code} with ${company.name}`,
-        });
-      }
-    }
-  }
+  // const orderedWilayas = new Set(orders.filter(isValid).map((o) => String(o.wilayaCode)));
+  // const wilayaMap = new Map(wilayas.map((w) => [String(w.code), w.name]));
+  // const coveredPairs = new Set(
+  //   shippingPrices.map((p) => `${p.wilayaCode}:${p.shippingCompanyId}`)
+  // );
+  //
+  // for (const code of orderedWilayas) {
+  //   for (const company of activeCompanies) {
+  //     const key = `${code}:${company.id}`;
+  //     if (!coveredPairs.has(key)) {
+  //       warnings.push({
+  //         type: "missing_shipping_price",
+  //         label: `Missing shipping price`,
+  //         detail: `No price set for ${wilayaMap.get(code) ?? code} with ${company.name}`,
+  //       });
+  //     }
+  //   }
+  // }
 
   // Coupon warnings
   for (const coupon of coupons) {

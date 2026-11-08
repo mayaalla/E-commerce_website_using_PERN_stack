@@ -5,7 +5,8 @@ import type {
   Category,
   Wilaya,
   ShippingCompany,
-  ShippingPrice,
+  // TODO: shipping prices — endpoint GET /api/shipping/prices not yet implemented on the backend
+  // ShippingPrice,
   Coupon,
   AdminUser,
   ApiListResponse,
@@ -27,8 +28,9 @@ export const fetchWilayas = (): Promise<ApiListResponse<Wilaya>> =>
 export const fetchShippingCompanies = (): Promise<ApiListResponse<ShippingCompany>> =>
   apiClient.get<ApiListResponse<ShippingCompany>>("/shipping/companies").then((r) => r.data);
 
-export const fetchShippingPrices = (): Promise<ApiListResponse<ShippingPrice>> =>
-  apiClient.get<ApiListResponse<ShippingPrice>>("/shipping/prices").then((r) => r.data);
+// TODO: shipping prices — endpoint GET /api/shipping/prices not yet implemented on the backend
+// export const fetchShippingPrices = (): Promise<ApiListResponse<ShippingPrice>> =>
+//   apiClient.get<ApiListResponse<ShippingPrice>>("/shipping/prices").then((r) => r.data);
 
 export const fetchCoupons = (): Promise<ApiListResponse<Coupon>> =>
   apiClient.get<ApiListResponse<Coupon>>("/coupons").then((r) => r.data);

@@ -51,12 +51,13 @@ export interface ShippingCompany {
   status: "active" | "inactive" | string;
 }
 
-export interface ShippingPrice {
-  wilayaCode: string | number;
-  shippingCompanyId: string | number;
-  price: string | number;
-  status: string;
-}
+// TODO: shipping prices — endpoint GET /api/shipping/prices not yet implemented on the backend
+// export interface ShippingPrice {
+//   wilayaCode: string | number;
+//   shippingCompanyId: string | number;
+//   price: string | number;
+//   status: string;
+// }
 
 export interface Coupon {
   code: string;
@@ -140,7 +141,9 @@ export interface ColorCount {
 }
 
 export interface SetupWarning {
-  type: "missing_shipping_price" | "inactive_company" | "expiring_coupon" | "expired_coupon";
+  // TODO: shipping prices — "missing_shipping_price" type removed until GET /api/shipping/prices is implemented on the backend
+  // type: "missing_shipping_price" | "inactive_company" | "expiring_coupon" | "expired_coupon";
+  type: "inactive_company" | "expiring_coupon" | "expired_coupon";
   label: string;
   detail: string;
 }
@@ -151,7 +154,9 @@ export interface DashboardData {
   categories: Category[];
   wilayas: Wilaya[];
   shippingCompanies: ShippingCompany[];
-  shippingPrices: ShippingPrice[];
+  // TODO: shipping prices — endpoint GET /api/shipping/prices not yet implemented on the backend
+  // shippingPrices: ShippingPrice[];
+  shippingPrices: never[];
   coupons: Coupon[];
   admin: AdminUser | null;
   isLoading: boolean;
