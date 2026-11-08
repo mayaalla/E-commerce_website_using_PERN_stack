@@ -112,7 +112,7 @@ function CategoryRow({ category }) {
       }
     >
       {/* ID */}
-      <TableCell className="w-16 text-muted-foreground font-mono text-xs select-none">
+      <TableCell className="w-16 pl-6 text-muted-foreground font-mono text-xs select-none">
         #{category.id}
       </TableCell>
 
@@ -154,7 +154,7 @@ function CategoryRow({ category }) {
       </TableCell>
 
       {/* Actions */}
-      <TableCell className="w-24 text-right">
+      <TableCell className="w-28 pr-6 text-right">
         <div className="flex items-center justify-end gap-1">
           {isEditing ? (
             /* ── Confirm button (only enabled when name actually changed) ── */
@@ -222,11 +222,12 @@ function CategoryRow({ category }) {
 
 // ─── CategoryTable ────────────────────────────────────────────────────────────
 // Renders the full shadcn/ui Table with one CategoryRow per category.
+// Lives inside the CategoriesPanel Card — no extra wrapper border needed.
 // ─────────────────────────────────────────────────────────────────────────────
 function CategoryTable({ categories }) {
   if (!categories || categories.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-muted/30 py-16 text-center">
+      <div className="border-t border-dashed border-border bg-muted/20 py-16 text-center">
         <p className="text-sm text-muted-foreground">
           No categories yet. Add one above to get started.
         </p>
@@ -235,29 +236,27 @@ function CategoryTable({ categories }) {
   }
 
   return (
-    <div className="rounded-lg border border-border overflow-hidden shadow-sm">
-      <Table>
-        <TableHeader>
-          <TableRow className="hover:bg-transparent border-b bg-muted/50">
-            <TableHead className="w-16 text-xs uppercase tracking-wider text-muted-foreground">
-              ID
-            </TableHead>
-            <TableHead className="text-xs uppercase tracking-wider text-muted-foreground">
-              Name
-            </TableHead>
-            <TableHead className="w-24 text-right text-xs uppercase tracking-wider text-muted-foreground">
-              Actions
-            </TableHead>
-          </TableRow>
-        </TableHeader>
+    <Table>
+      <TableHeader>
+        <TableRow className="hover:bg-transparent border-b bg-muted/50">
+          <TableHead className="w-16 pl-6 text-xs uppercase tracking-wider text-muted-foreground">
+            ID
+          </TableHead>
+          <TableHead className="text-xs uppercase tracking-wider text-muted-foreground">
+            Name
+          </TableHead>
+          <TableHead className="w-28 pr-6 text-right text-xs uppercase tracking-wider text-muted-foreground">
+            Actions
+          </TableHead>
+        </TableRow>
+      </TableHeader>
 
-        <TableBody>
-          {categories.map((cat) => (
-            <CategoryRow key={cat.id} category={cat} />
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+      <TableBody>
+        {categories.map((cat) => (
+          <CategoryRow key={cat.id} category={cat} />
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 

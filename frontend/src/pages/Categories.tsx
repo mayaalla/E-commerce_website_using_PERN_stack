@@ -1,40 +1,32 @@
 import * as React from "react";
+import { Tag } from "lucide-react";
 import CategoriesPanel from "@/features/categories/components/CategoriesPanel";
 
 // ─── CategoriesPage ───────────────────────────────────────────────────────────
 // Top-level route component for /categories.
 //
-// Layout:
-//   ┌─ page wrapper (centered, max-w, padding) ────────────────────────────┐
-//   │  Page header (title + description)                                   │
-//   │  ─────────────────────────────────────────────────────────────────── │
-//   │  CategoriesPanel                                                      │
-//   │    ├─ AddCategoryBar  (input + "Add Category" button)                │
-//   │    └─ CategoryTable   (id | name | edit/delete actions)              │
+// Layout (matches the Home page dashboard style):
+//   ┌─ page wrapper (space-y-8, pb-10) ───────────────────────────────────┐
+//   │  Page header row (icon + title + description)                        │
+//   │  CategoriesPanel (Card with AddCategoryBar + CategoryTable)          │
 //   └──────────────────────────────────────────────────────────────────────┘
 // ─────────────────────────────────────────────────────────────────────────────
 export default function CategoriesPage() {
   return (
-    <main className="min-h-screen bg-background">
-      <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
-
-        {/* ── Page header ──────────────────────────────────────────────── */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            Categories
-          </h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            Manage product categories. Add new ones, rename existing ones
-            directly in the table, or remove them.
-          </p>
+    <div className="space-y-8 pb-10">
+      {/* ── Page header — same style as Home greeting row ─────────────── */}
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <Tag className="size-6 text-primary" />
+          <h1 className="text-2xl font-bold tracking-tight">Categories</h1>
         </div>
-
-        {/* ── Divider ──────────────────────────────────────────────────── */}
-        <div className="mb-8 h-px bg-border" />
-
-        {/* ── Main content ─────────────────────────────────────────────── */}
-        <CategoriesPanel />
+        <p className="text-sm text-muted-foreground">
+          Manage product categories — add new ones, rename or remove existing ones.
+        </p>
       </div>
-    </main>
+
+      {/* ── Main content ─────────────────────────────────────────────── */}
+      <CategoriesPanel />
+    </div>
   );
 }
