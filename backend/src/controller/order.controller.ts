@@ -8,6 +8,7 @@ import {
   deleteOrderByIdService,
   type CreateOrderPayload,
   type UpdateOrderStatusPayload,
+  type CreateOrderResult,
 } from "../service/order.service.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,7 +61,7 @@ const isTerminalOrderStatus = (err: unknown) =>
  * The server recomputes the total from live product prices, so the client
  * cannot manipulate the charge by sending an incorrect total.
  *
- * Returns 201 + the new order record on success.
+ * Returns 201 + the new order record and a full pricing breakdown on success.
  * Returns 404 if a referenced entity (wilaya, commune, company, product) does not exist.
  * Returns 422 if the shipping price is not configured for the chosen company + wilaya.
  * Returns 400 if the coupon code does not exist or is no longer active.
@@ -72,9 +73,9 @@ export async function createOrder(
 ): Promise<void> {
   try {
     const payload = req.body as CreateOrderPayload;
-    const order = await createOrderService(payload);
+    const result: CreateOrderResult = await createOrderService(payload);
 
-    res.status(201).json({ success: true, data: order });
+    res.status(201).json({ success: true, data: result });
   } catch (error) {
     if (isNotFound(error)) {
       return next(createHttpError(404, (error as Error).message));
