@@ -58,6 +58,23 @@ export type CreateOrderPayload = {
 };
 
 /**
+ * Extended response returned by createOrderService.
+ * Includes the persisted order plus a pricing breakdown so the client
+ * can display sub-total, discount amount, shipping, and grand total.
+ */
+export type CreateOrderResult = {
+  order: Order;
+  pricing: {
+    subtotal: string;
+    discountPercentage: number;
+    discountAmount: string;
+    shippingCost: string;
+    total: string;
+    couponCode: string | null;
+  };
+};
+
+/**
  * Payload accepted when updating an order's status.
  * Access control (admin-only) is enforced at the router/middleware level.
  */
@@ -186,7 +203,7 @@ async function fetchShippingCost(
 
 export async function createOrderService(
   payload: CreateOrderPayload
-): Promise<Order> {
+): Promise<CreateOrderResult> {
   const {
     name,
     phoneNumber,
@@ -240,9 +257,12 @@ export async function createOrderService(
     // ── Step 5: Validate coupon (if supplied) ───────────────────────────────
     // Performed after product resolution so we fail fast on bad product ids
     // before touching the coupons table.
+    let discountPercentage = 0;
+
     if (couponCode) {
       // Throws COUPON_NOT_FOUND or COUPON_UNAVAILABLE when the code is invalid.
-      await validateCouponCodeService(couponCode);
+      const coupon = await validateCouponCodeService(couponCode);
+      discountPercentage = coupon.discountPercentage;
     }
 
     // ── Step 6: Build snapshots & compute server-side total ─────────────────
@@ -272,7 +292,11 @@ export async function createOrderService(
       return snapshot;
     });
 
-    const total = (productSubtotal + shippingCost).toFixed(2);
+    // Apply coupon discount to the product subtotal only (not to shipping).
+    const discountMultiplier = 1 - discountPercentage / 100;
+    const discountedSubtotal = productSubtotal * discountMultiplier;
+    const discountAmount = productSubtotal - discountedSubtotal;
+    const total = (discountedSubtotal + shippingCost).toFixed(2);
 
     // ── Step 7: Persist the order ───────────────────────────────────────────
     const [newOrder] = await tx
@@ -289,7 +313,17 @@ export async function createOrderService(
       })
       .returning();
 
-    return newOrder;
+    return {
+      order: newOrder,
+      pricing: {
+        subtotal: productSubtotal.toFixed(2),
+        discountPercentage,
+        discountAmount: discountAmount.toFixed(2),
+        shippingCost: shippingCost.toFixed(2),
+        total,
+        couponCode: couponCode ?? null,
+      },
+    };
   });
 }
 
