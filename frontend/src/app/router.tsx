@@ -6,7 +6,7 @@ import HomePage        from "@/pages/Home";
 import CategoriesPage  from "@/pages/Categories";
 import ProductsPage    from "@/pages/Products";
 // import OrdersPage      from "@/pages/Orders";
-// import CouponsPage     from "@/pages/Coupons";
+import CouponsPage     from "@/pages/Coupons";
 // import ShippingsPage   from "@/pages/Shippings";
 // import WilayaPage      from "@/pages/Willaya";
 // import CommunePage     from "@/pages/Commune";
@@ -49,7 +49,7 @@ const router = createBrowserRouter([
           { path: "/products",  element: <ProductsPage /> },
           { path: "/categories",element: <CategoriesPage /> },
           // { path: "/orders",    element: <OrdersPage /> },
-          // { path: "/coupons",   element: <CouponsPage /> },
+          { path: "/coupons",   element: <CouponsPage /> },
           // { path: "/shippings", element: <ShippingsPage /> },
           // { path: "/wilaya",    element: <WilayaPage /> },
           // { path: "/commune",   element: <CommunePage /> },
