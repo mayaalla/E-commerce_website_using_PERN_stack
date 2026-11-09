@@ -363,6 +363,13 @@ const createCouponSchema = z.object({
       "Expire date must be in the future"
     ),
 
+  // Discount percentage: integer between 1 and 100.
+  discountPercentage: z
+    .number()
+    .int("discountPercentage must be an integer")
+    .min(1, "discountPercentage must be at least 1")
+    .max(100, "discountPercentage must be at most 100"),
+
   // Status defaults to "active" when not provided.
   status: z.enum(couponStatuses).default("active"),
 });
