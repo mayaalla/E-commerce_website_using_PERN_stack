@@ -14,6 +14,7 @@ export type Coupon = typeof coupons.$inferSelect;
 export type CreateCouponPayload = {
   code: string;
   expireDate: string; // YYYY-MM-DD
+  discountPercentage: number; // 0–100 integer
   status?: "active" | "inactive" | "expired";
 };
 
@@ -64,6 +65,7 @@ export async function createCouponService(
     .values({
       code: payload.code,
       expireDate: payload.expireDate,
+      discountPercentage: payload.discountPercentage,
       status: payload.status ?? "active",
     })
     .returning();
