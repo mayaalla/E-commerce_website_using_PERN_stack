@@ -163,12 +163,22 @@ export const communes = pgTable("communes", {
     .references(() => wilayas.code),
 });
 
-export const coupons = pgTable("coupons", {
-  id: serial("id").primaryKey(),
-  code: text("code").notNull().unique(),
-  expireDate: date("expire_date").notNull(),
-  status: couponStatus("status").notNull().default("active"),
-});
+export const coupons = pgTable(
+  "coupons",
+  {
+    id: serial("id").primaryKey(),
+    code: text("code").notNull().unique(),
+    expireDate: date("expire_date").notNull(),
+    status: couponStatus("status").notNull().default("active"),
+    discountPercentage: integer("discount_percentage").notNull(),
+  },
+  (table) => [
+    check(
+      "coupons_discount_percentage_valid",
+      sql`${table.discountPercentage} >= 0 AND ${table.discountPercentage} <= 100`
+    ),
+  ]
+);
 
 // Snapshot the purchased items so product edits do not change past orders.
 // Monetary values are decimal strings, matching Drizzle's numeric columns.
