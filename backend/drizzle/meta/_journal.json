@@ -29,6 +29,13 @@
       "when": 1793488809471,
       "tag": "0003_talented_maestro",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794163386448,
+      "tag": "0004_bent_rogue",
+      "breakpoints": true
     }
   ]
 }
