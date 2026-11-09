@@ -890,18 +890,22 @@ Get the price for a specific company + wilaya combination.
 
 ### POST `/coupons`
 
+> 🔒 Requires: `authenticate` + `authorize("coupon_add")`
+
 **Request Body**
 
 ```json
 {
   "code": "SUMMER25",
   "expireDate": "2027-12-31",
+  "discountPercentage": 25,
   "status": "active"
 }
 ```
 
 > `code`: 4–20 chars, uppercase letters and digits only (e.g. `SAVE10`).  
 > `expireDate`: `YYYY-MM-DD`, must be a future date.  
+> `discountPercentage`: integer between `1` and `100` (required).  
 > `status` defaults to `active`.
 
 **Response `201`**
@@ -913,6 +917,7 @@ Get the price for a specific company + wilaya combination.
     "id": 1,
     "code": "SUMMER25",
     "expireDate": "2027-12-31",
+    "discountPercentage": 25,
     "status": "active"
   }
 }
@@ -924,17 +929,34 @@ Get the price for a specific company + wilaya combination.
 
 ### GET `/coupons`
 
-**Response `200`** — array of coupon objects.
+> 🔒 Requires: `authenticate` + `authorize("coupon_read")`
+
+**Response `200`** — array of coupon objects (each including `discountPercentage`).
 
 ---
 
 ### GET `/coupons/validate/:code`
 
-Validate a coupon code at checkout (public). Checks that it is active and not expired.
+Validate a coupon code at checkout **(public — no auth required)**. Checks that it is active and not expired.
 
 **Params:** `code` — the coupon code string (e.g. `SUMMER25`)
 
-**Response `200`** — coupon object (when valid).
+**Response `200`**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "code": "SUMMER25",
+    "expireDate": "2027-12-31",
+    "discountPercentage": 25,
+    "status": "active"
+  }
+}
+```
+
+> Use `discountPercentage` to show the customer a live discount preview in the cart UI before they place the order.
 
 **Errors**
 
@@ -947,19 +969,34 @@ Validate a coupon code at checkout (public). Checks that it is active and not ex
 
 ### GET `/coupons/:id`
 
-**Response `200`** — single coupon. **`404`** if not found.
+> 🔒 Requires: `authenticate` + `authorize("coupon_read")`
+
+**Response `200`** — single coupon (including `discountPercentage`). **`404`** if not found.
 
 ---
 
 ### PUT `/coupons/:id`
 
-**Request Body** — same as `POST /coupons`, all fields optional.
+> 🔒 Requires: `authenticate` + `authorize("coupon_update")`
+
+**Request Body** — same fields as `POST /coupons`, all optional.
+
+```json
+{
+  "code": "WINTER30",
+  "expireDate": "2028-01-31",
+  "discountPercentage": 30,
+  "status": "inactive"
+}
+```
 
 **Response `200`** — updated coupon. **`404`** / **`409`** on error.
 
 ---
 
 ### DELETE `/coupons/:id`
+
+> 🔒 Requires: `authenticate` + `authorize("coupon_delete")`
 
 **Response `200`** — deleted coupon. **`404`** if not found.
 
@@ -969,9 +1006,9 @@ Validate a coupon code at checkout (public). Checks that it is active and not ex
 
 ### POST `/orders`
 
-Place a new customer order (public — no auth required).
+Place a new customer order **(public — no auth required)**.
 
-> ⚠️ The server recomputes `total` from live product prices. The `total` field in the request body is for client display only; the authoritative value comes from the server.
+> ⚠️ The server recomputes `total` from live product prices. The client **must not** send a `total` field — the authoritative value is always computed server-side, preventing price-manipulation attacks.
 
 **Request Body**
 
@@ -982,13 +1019,10 @@ Place a new customer order (public — no auth required).
   "wilayaCode": "16",
   "communeId": 3,
   "shippingCompanyId": 1,
-  "total": "649.99",
   "products": [
     {
       "productId": 10,
-      "title": "Red T-Shirt",
       "quantity": 2,
-      "price": "299.99",
       "color": "red",
       "size": "40"
     }
@@ -998,9 +1032,8 @@ Place a new customer order (public — no auth required).
 ```
 
 > `phoneNumber`: 10 digits, starts with `0`.  
-> `products`: at least 1 item required.  
-> `color` and `size` per item are optional.  
-> `couponCode` is optional.
+> `products`: at least 1 item required. `color` and `size` per item are optional.  
+> `couponCode` is optional. When supplied, the discount is applied to the product subtotal only (not to shipping).
 
 **Response `201`**
 
@@ -1008,33 +1041,49 @@ Place a new customer order (public — no auth required).
 {
   "success": true,
   "data": {
-    "id": 42,
-    "name": "Amira Benali",
-    "phoneNumber": "0555123456",
-    "wilayaCode": "16",
-    "communeId": 3,
-    "shippingCompanyId": 1,
-    "total": "649.99",
-    "products": [ { "productId": 10, "title": "Red T-Shirt", "quantity": 2, "price": "299.99", "color": "red", "size": "40" } ],
-    "date": "2026-11-01",
-    "hour": "01:43:00",
-    "status": "pending"
+    "order": {
+      "id": 42,
+      "name": "Amira Benali",
+      "phoneNumber": "0555123456",
+      "wilayaCode": "16",
+      "communeId": 3,
+      "shippingCompanyId": 1,
+      "total": "1049.99",
+      "products": [
+        { "productId": 10, "title": "Red T-Shirt", "quantity": 2, "price": "299.99", "color": "red", "size": "40" }
+      ],
+      "date": "2026-11-08",
+      "hour": "19:34:00",
+      "status": "pending"
+    },
+    "pricing": {
+      "subtotal": "599.98",
+      "discountPercentage": 25,
+      "discountAmount": "150.00",
+      "shippingCost": "600.01",
+      "total": "1049.99",
+      "couponCode": "SUMMER25"
+    }
   }
 }
 ```
+
+> When no coupon is used, `discountPercentage` is `0`, `discountAmount` is `"0.00"`, and `couponCode` is `null`.
 
 **Errors**
 
 | Status | Message |
 |---|---|
 | `400` | Validation error |
-| `404` | Wilaya / commune / product not found |
+| `404` | Wilaya / commune / shipping company / product not found |
 | `400` | Coupon not found or unavailable |
 | `422` | Shipping price not configured for that wilaya + company |
 
 ---
 
 ### GET `/orders`
+
+> 🔒 Requires: `authenticate` + `authorize("order_read")`
 
 Get all orders, most-recent first.
 
@@ -1044,11 +1093,15 @@ Get all orders, most-recent first.
 
 ### GET `/orders/:id`
 
+> 🔒 Requires: `authenticate` + `authorize("order_read")`
+
 **Response `200`** — single order object. **`404`** if not found.
 
 ---
 
 ### PATCH `/orders/:id/status`
+
+> 🔒 Requires: `authenticate` + `authorize("order_update")`
 
 Update an order's status. Orders in a terminal state (`canceled`, `returned`) cannot be updated.
 
@@ -1071,6 +1124,8 @@ Update an order's status. Orders in a terminal state (`canceled`, `returned`) ca
 ---
 
 ### DELETE `/orders/:id`
+
+> 🔒 Requires: `authenticate` + `authorize("order_delete")`
 
 Hard-delete an order and return its last snapshot.
 
