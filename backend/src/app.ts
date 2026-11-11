@@ -1,10 +1,12 @@
 import 'dotenv/config';
-import express, { type ErrorRequestHandler } from 'express';
+import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { rateLimit } from 'express-rate-limit';
 import morgan from 'morgan';
+
+import { errorHandler } from './middleware/error.js';
 
 import categoryRouter from './router/category.router.js';
 import wilayaRouter from './router/wilaya.router.js';
@@ -53,24 +55,6 @@ app.use('/api/auth', authRouter);
 app.use((_req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
-
-const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, next) => {
-  if (res.headersSent) {
-    next(error);
-    return;
-  }
-
-  console.error(error);
-  const status = typeof error === 'object' && error !== null && 'status' in error
-    && typeof error.status === 'number' && Number.isInteger(error.status)
-    && error.status >= 400 && error.status < 500
-    ? error.status
-    : 500;
-
-  res.status(status).json({
-    message: status === 500 ? 'Internal server error' : 'Invalid request',
-  });
-};
 
 app.use(errorHandler);
 
