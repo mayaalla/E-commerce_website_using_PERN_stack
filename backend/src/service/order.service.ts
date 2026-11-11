@@ -1,4 +1,4 @@
-import { and, eq, desc, inArray } from "drizzle-orm";
+import { and, eq, desc, inArray, isNull, sql, notInArray } from "drizzle-orm";
 
 import { db } from "../db/db.js";
 import {
@@ -230,6 +230,7 @@ export async function createOrderService(
     // ── Step 3: Fetch live product rows ─────────────────────────────────────
     // Read inside the transaction so any concurrent price change that commits
     // before our INSERT is captured in the snapshot and the computed total.
+    // Only active (non-soft-deleted) products are eligible for purchase.
     const productIds = [...new Set(items.map((i) => i.productId))];
 
     const productRows = await tx
@@ -240,7 +241,7 @@ export async function createOrderService(
         promo: products.promo,
       })
       .from(products)
-      .where(inArray(products.id, productIds));
+      .where(and(inArray(products.id, productIds), isNull(products.deletedAt)));
 
     // ── Step 4: Guard – every requested product must exist ──────────────────
     const productMap = new Map(productRows.map((r) => [r.id, r]));
@@ -339,7 +340,7 @@ export async function getOrderByIdService(id: number): Promise<Order> {
     .where(eq(orders.id, id))
     .limit(1);
 
-  if (!order) {
+  if (!order || order.deletedAt) {
     throw serviceError(`Order with id ${id} not found`, "NOT_FOUND");
   }
 
@@ -352,7 +353,12 @@ export async function getOrderByIdService(id: number): Promise<Order> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getAllOrdersService(): Promise<Order[]> {
-  return db.select().from(orders).orderBy(desc(orders.id));
+  // Return only non-deleted orders, ordered most-recent first.
+  return db
+    .select()
+    .from(orders)
+    .where(isNull(orders.deletedAt))
+    .orderBy(desc(orders.id));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -374,10 +380,10 @@ export async function updateOrderStatusService(
   const [existing] = await db
     .select({ id: orders.id, status: orders.status })
     .from(orders)
-    .where(eq(orders.id, id))
+    .where(and(isNull(orders.deletedAt), eq(orders.id, id)))
     .limit(1);
 
-  if (!existing) {
+  if (!existing ) {
     throw serviceError(`Order with id ${id} not found`, "NOT_FOUND");
   }
 
@@ -403,9 +409,8 @@ export async function updateOrderStatusService(
 // ─────────────────────────────────────────────────────────────────────────────
 // Delete
 //
-// Hard-deletes the order row and returns its last snapshot.
-// In a production system you may prefer a soft-delete (adding a `deletedAt`
-// timestamp column) to preserve historical records for auditing.
+// Soft-deletes the order row by stamping `deletedAt` and returns its snapshot.
+// The row is preserved in the database for auditing and historical reporting.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function deleteOrderByIdService(id: number): Promise<Order> {
@@ -415,11 +420,77 @@ export async function deleteOrderByIdService(id: number): Promise<Order> {
     .where(eq(orders.id, id))
     .limit(1);
 
-  if (!existing) {
+  if (!existing || existing.deletedAt) {
     throw serviceError(`Order with id ${id} not found`, "NOT_FOUND");
   }
 
-  await db.delete(orders).where(eq(orders.id, id));
+  await db.update(orders).set({ deletedAt: new Date().toISOString().slice(0, 10) }).where(eq(orders.id, id));
 
   return existing;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stats
+//
+// Revenue is calculated across ALL orders (including soft-deleted ones) because
+// soft-deleting an order is an admin UI action — it does NOT reverse the actual
+// payment that was collected.  Excluding soft-deleted rows would silently
+// under-report how much money the store has earned.
+//
+// Only revenue-generating statuses are counted:
+//   ✅ confirmed  – order accepted and paid
+//   ✅ shipped    – in transit, payment collected
+//   ❌ pending    – not yet confirmed
+//   ❌ canceled   – no money collected
+//   ❌ returned   – money refunded
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Shape returned by getOrderStatsService. */
+export type OrderStats = {
+  /** Total revenue from confirmed + shipped orders (all time, including soft-deleted rows). */
+  totalRevenue: string;
+  /** Total number of orders visible in the dashboard (soft-deleted excluded). */
+  activeOrderCount: number;
+  /** Total number of orders ever placed (soft-deleted included). */
+  allTimeOrderCount: number;
+};
+
+const REVENUE_STATUSES: Order["status"][] = ["confirmed", "shipped"];
+
+export async function getOrderStatsService(): Promise<OrderStats> {
+  // ── Revenue ──────────────────────────────────────────────────────────────
+  // SUM(total) across every confirmed/shipped order regardless of deletedAt.
+  // Using a raw SQL aggregation so we do a single round-trip.
+  const [revenueRow] = await db
+    .select({
+      totalRevenue: sql<string>`COALESCE(SUM(${orders.total}), 0)::text`,
+    })
+    .from(orders)
+    .where(
+      // Include soft-deleted rows — only filter by business-meaningful status.
+      notInArray(orders.status, ["pending", "canceled", "returned"] as Order["status"][])
+    );
+
+  // ── Active order count ───────────────────────────────────────────────────
+  // Orders the admin can see in the dashboard (soft-deleted excluded).
+  const [activeRow] = await db
+    .select({
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(orders)
+    .where(isNull(orders.deletedAt));
+
+  // ── All-time order count ─────────────────────────────────────────────────
+  const [allTimeRow] = await db
+    .select({
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(orders);
+
+  return {
+    totalRevenue: revenueRow?.totalRevenue ?? "0",
+    activeOrderCount: activeRow?.count ?? 0,
+    allTimeOrderCount: allTimeRow?.count ?? 0,
+  };
 }
