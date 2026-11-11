@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "../db/db.js";
 import { shippingCompanies, shippingPrices, wilayas } from "../db/schema.js";
@@ -153,10 +153,11 @@ export async function createShippingCompanyService(
 ): Promise<ShippingCompany> {
   // Guard: a company with the same name would create ambiguity in name-based
   // resolution and is likely a user mistake.
+  // Only active (non-soft-deleted) companies count for uniqueness.
   const [existing] = await db
     .select()
     .from(shippingCompanies)
-    .where(eq(shippingCompanies.name, payload.name))
+    .where(and(eq(shippingCompanies.name, payload.name), isNull(shippingCompanies.deletedAt)))
     .limit(1);
 
   if (existing) {
@@ -194,7 +195,7 @@ export async function getShippingCompanyByIdService(
     .where(eq(shippingCompanies.id, id))
     .limit(1);
 
-  if (!company) {
+  if (!company || company.deletedAt) {
     throw new Error(`Shipping company with id ${id} not found`);
   }
 
@@ -209,7 +210,9 @@ export async function getShippingCompanyByIdService(
 export async function getAllShippingCompaniesService(): Promise<
   ShippingCompany[]
 > {
-  return db.select().from(shippingCompanies);
+  return db.select().from(shippingCompanies).where(isNull(shippingCompanies.deletedAt));
+
+
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -229,16 +232,17 @@ export async function updateShippingCompanyByIdService(
     .where(eq(shippingCompanies.id, id))
     .limit(1);
 
-  if (!existing) {
+  if (!existing || existing.deletedAt) {
     throw new Error(`Shipping company with id ${id} not found`);
   }
 
-  // Guard: if the caller is changing the name, make sure the new name is unique.
+  // Guard: if the caller is changing the name, make sure the new name is unique
+  // among active (non-soft-deleted) companies.
   if (payload.name && payload.name !== existing.name) {
     const [duplicate] = await db
       .select()
       .from(shippingCompanies)
-      .where(eq(shippingCompanies.name, payload.name))
+      .where(and(eq(shippingCompanies.name, payload.name), isNull(shippingCompanies.deletedAt)))
       .limit(1);
 
     if (duplicate) {
@@ -282,11 +286,11 @@ export async function deleteShippingCompanyByIdService(
     .where(eq(shippingCompanies.id, id))
     .limit(1);
 
-  if (!existing) {
+  if (!existing || existing.deletedAt) {
     throw new Error(`Shipping company with id ${id} not found`);
   }
 
-  await db.delete(shippingCompanies).where(eq(shippingCompanies.id, id));
+  await db.update(shippingCompanies).set({ deletedAt: new Date().toISOString().slice(0, 10) }).where(eq(shippingCompanies.id, id));
 
   return existing;
 }
