@@ -1,4 +1,5 @@
-// App.jsx is intentionally minimal — routing is handled by router.tsx
+import { AppRouter } from "./router";
+
 export default function App() {
-  return null;
+  return <AppRouter />;
 }
