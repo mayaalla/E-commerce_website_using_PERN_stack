@@ -92,6 +92,7 @@ export const admins = pgTable("admins", {
 export const categories = pgTable("categories", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
+  deletedAt: date("deleted_at"), // Soft delete timestamp, null if not deleted
 });
 
 export const products = pgTable(
@@ -109,6 +110,7 @@ export const products = pgTable(
     categoryId: integer("category_id")
       .notNull()
       .references(() => categories.id),
+    deletedAt: date("deleted_at"), // Soft delete timestamp, null if not deleted
   },
   (table) => [
     check("products_price_non_negative", sql`${table.price} >= 0`),
@@ -124,6 +126,7 @@ export const shippingCompanies = pgTable("shipping_companies", {
   name: text("name").notNull(),
   hashedApiKey: text("hashed_api_key").notNull(),
   status: shippingCompanyStatus("status").notNull().default("active"),
+  deletedAt: date("deleted_at"), // Soft delete timestamp, null if not deleted
 });
 
 export const wilayas = pgTable("wilayas", {
@@ -143,7 +146,8 @@ export const shippingPrices = pgTable(
     shippingCompanyId: integer("shipping_company_id")
       .notNull()
       .references(() => shippingCompanies.id),
-    status: shippingWilayaStatus("status").notNull().default("active")
+    status: shippingWilayaStatus("status").notNull().default("active"),
+
   },
   (table) => [
     unique("shipping_prices_company_wilaya_unique").on(
@@ -211,6 +215,7 @@ export const orders = pgTable(
     date: date("date").notNull().default(sql`CURRENT_DATE`),
     hour: time("hour").notNull().default(sql`LOCALTIME`),
     status: orderStatus("status").notNull().default("pending"),
+    deletedAt: date("deleted_at"), // Soft delete timestamp, null if not deleted
   },
   (table) => [
     check("orders_total_non_negative", sql`${table.total} >= 0`),
