@@ -6,6 +6,7 @@ import {
   getOrderById,
   updateOrderStatus,
   deleteOrderById,
+  getOrderStats,
 } from "../controller/order.controller.js";
 import {
   validateCreateOrder,
@@ -31,6 +32,13 @@ router.post("/", validateCreateOrder, createOrder);
 router.get("/", getAllOrders);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /api/orders/stats
+// Store-wide order statistics including total revenue.
+// MUST be declared before /:id so Express does not treat "stats" as an id param.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/stats", getOrderStats);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /api/orders/:id
 // Validate :id is a positive integer before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,7 +53,7 @@ router.patch("/:id/status", validateId(), validateUpdateOrderStatus, updateOrder
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DELETE /api/orders/:id
-// Hard-delete the order record and return its final snapshot.
+// Soft-delete the order record and return its final snapshot.
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete("/:id", validateId(), deleteOrderById);
 
