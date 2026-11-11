@@ -51,8 +51,8 @@ import {
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
-import { useDashboardData } from "@/features/dashboard/useDashboardData";
-import { patchOrderStatus } from "@/features/dashboard/api";
+import { useDashboardData } from "@/features/dashboard/hooks/useDashboardData";
+import { patchOrderStatus } from "@/features/dashboard";
 import {
   filterByRange,
   filterPrevPeriod,
