@@ -23,6 +23,7 @@ export interface Order {
   date: string;   // YYYY-MM-DD
   hour: string;   // HH:mm:ss
   status: OrderStatus;
+  deletedAt: string | null; // soft-delete — null means active
 }
 
 export interface Product {
@@ -33,11 +34,13 @@ export interface Product {
   image?: string;
   categoryId?: string | number;
   stock?: number;
+  deletedAt: string | null; // soft-delete — null means active
 }
 
 export interface Category {
   id: string | number;
   name: string;
+  deletedAt: string | null; // soft-delete — null means active
 }
 
 export interface Wilaya {
@@ -49,6 +52,7 @@ export interface ShippingCompany {
   id: string | number;
   name: string;
   status: "active" | "inactive" | string;
+  deletedAt: string | null; // soft-delete — null means active
 }
 
 // TODO: shipping prices — endpoint GET /api/shipping/prices not yet implemented on the backend
@@ -85,13 +89,34 @@ export interface ApiResponse<T> {
   data: T;
 }
 
+// ─── Order stats (from GET /orders/stats) ────────────────────────────────────
+
+/**
+ * Shape returned by GET /orders/stats.
+ *
+ * - totalRevenue      – sum of confirmed + shipped orders (soft-deleted included)
+ * - activeOrderCount  – orders visible in the dashboard (not soft-deleted)
+ * - allTimeOrderCount – every order ever placed (including soft-deleted)
+ */
+export interface OrderStats {
+  totalRevenue: string;      // numeric string, e.g. "158420.50"
+  activeOrderCount: number;
+  allTimeOrderCount: number;
+}
+
 // ─── Dashboard computed data ──────────────────────────────────────────────────
 
 export type DateRange = "today" | "7days" | "30days" | "all";
 
 export interface KpiData {
+  /** Total revenue from confirmed + shipped orders (all-time, soft-deleted included). */
+  totalRevenue: number;
   netSales: number;
   netSalesPrev: number;
+  /** Active order count from /orders/stats (excludes soft-deleted). */
+  activeOrderCount: number;
+  /** All-time order count from /orders/stats (includes soft-deleted). */
+  allTimeOrderCount: number;
   orderCount: number;
   orderCountPrev: number;
   avgOrderValue: number;
@@ -150,6 +175,7 @@ export interface SetupWarning {
 
 export interface DashboardData {
   orders: Order[];
+  orderStats: OrderStats | null;
   products: Product[];
   categories: Category[];
   wilayas: Wilaya[];
