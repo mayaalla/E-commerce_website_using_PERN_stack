@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 
 import { db } from "../db/db.js";
 import { categories } from "../db/schema.js";
@@ -41,13 +41,16 @@ export async function createCategoryService(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getCategoryByIdService(id: number): Promise<Category> {
+  // get the category by id, if it doesn't exist or is deleted, throw an error
   const [category] = await db
     .select()
     .from(categories)
-    .where(eq(categories.id, id))
+    .where(eq(categories.id, id) )
     .limit(1);
 
-  if (!category) {
+
+
+  if (!category || category.deletedAt) {
     throw new Error(`Category with id ${id} not found`);
   }
 
@@ -60,7 +63,7 @@ export async function getCategoryByIdService(id: number): Promise<Category> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getAllCategoriesService(): Promise<Category[]> {
-  return db.select().from(categories);
+  return db.select().from(categories).where(isNull(categories.deletedAt));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -72,14 +75,14 @@ export async function updateCategoryByIdService(
   id: number,
   payload: UpdateCategoryPayload
 ): Promise<Category> {
-  // Guard: make sure the row is present before we attempt an UPDATE.
+  // Guard: make sure the row is present AND not soft-deleted before we attempt an UPDATE.
   const [existing] = await db
     .select()
     .from(categories)
     .where(eq(categories.id, id))
     .limit(1);
 
-  if (!existing) {
+  if (!existing || existing.deletedAt) {
     throw new Error(`Category with id ${id} not found`);
   }
 
@@ -94,7 +97,7 @@ export async function updateCategoryByIdService(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Delete
-// Verify the record exists, remove it, and return its last snapshot.
+// Verify the record exists, soft-delete it, and return its last snapshot.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function deleteCategoryByIdService(id: number): Promise<Category> {
@@ -104,14 +107,16 @@ export async function deleteCategoryByIdService(id: number): Promise<Category> {
     .where(eq(categories.id, id))
     .limit(1);
 
-  if (!existing) {
+  // Guard: throw if the row does not exist OR is already soft-deleted.
+  if (!existing || existing.deletedAt) {
     throw new Error(`Category with id ${id} not found`);
   }
 
-  // A category that still has products attached will violate the FK constraint
-  // on products.category_id.  The DB will throw; let it bubble up to the
-  // controller so it can map to HTTP 409.
-  await db.delete(categories).where(eq(categories.id, id));
+  const [deleted] = await db
+    .update(categories)
+    .set({ deletedAt: new Date().toISOString().slice(0, 10) })
+    .where(eq(categories.id, id))
+    .returning();
 
-  return existing;
+  return deleted;
 }
