@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useState, useEffect } from "react";
-import { Pencil, Trash2, Loader2 } from "lucide-react";
+import { Pencil, Trash2, Loader2, Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/table";
 import {
   Dialog,
-  DialogTrigger,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -39,18 +38,86 @@ import { useGetCategories } from "@/features/categories";
 const CLOTHING_SIZES = ["34", "36", "38", "40", "42", "44", "46", "48"];
 const MAX_BADGES = 3;
 
+// ─── Color picker constants (mirrors AddProductWindow) ────────────────────────
+/** 16 famous preset colors shown as swatches */
+const PRESET_COLORS = [
+  { hex: "#000000", label: "Black" },
+  { hex: "#FFFFFF", label: "White" },
+  { hex: "#FF0000", label: "Red" },
+  { hex: "#0000FF", label: "Blue" },
+  { hex: "#008000", label: "Green" },
+  { hex: "#FFFF00", label: "Yellow" },
+  { hex: "#FFA500", label: "Orange" },
+  { hex: "#800080", label: "Purple" },
+  { hex: "#FFC0CB", label: "Pink" },
+  { hex: "#A52A2A", label: "Brown" },
+  { hex: "#808080", label: "Gray" },
+  { hex: "#C0C0C0", label: "Silver" },
+  { hex: "#FFD700", label: "Gold" },
+  { hex: "#40E0D0", label: "Turquoise" },
+  { hex: "#000080", label: "Navy" },
+  { hex: "#FFCBA4", label: "Skin" },
+];
+
+/** Light-coloured swatches that need a dark border / check mark */
+const LIGHT_HEXES = new Set([
+  "#FFFFFF",
+  "#FFFF00",
+  "#FFCBA4",
+  "#C0C0C0",
+  "#FFD700",
+  "#FFC0CB",
+]);
+const isLightHex = (hex) => LIGHT_HEXES.has(hex.toUpperCase());
+
+/**
+ * Convert the product's colors array (string names) into the
+ * selectedColors format: { hex, name }[].
+ *
+ * Strategy:
+ *   • If the name matches a preset label → use that preset's hex.
+ *   • If the name is itself a valid hex (#RRGGBB) → use it directly.
+ *   • Otherwise → store it as a chip with a generated hex placeholder
+ *     that won't collide with presets (we use the string as both hex key
+ *     and name, but wrapped so the UI still works).
+ */
+function colorsArrayToSelected(colors) {
+  return colors.map((name) => {
+    // Try to find a matching preset by label (case-insensitive)
+    const preset = PRESET_COLORS.find(
+      (p) => p.label.toLowerCase() === name.toLowerCase()
+    );
+    if (preset) return { hex: preset.hex.toUpperCase(), name: preset.label };
+
+    // Check if it's already a hex value
+    if (/^#[0-9A-Fa-f]{6}$/.test(name)) {
+      return { hex: name.toUpperCase(), name: name.toUpperCase() };
+    }
+
+    // Unknown name — store it with a fake hex key so the chip renders.
+    // We generate a stable-ish key by hashing the name string.
+    const fakeHex = "#" + [...name].reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) & 0xffffff, 0)
+      .toString(16)
+      .padStart(6, "0")
+      .toUpperCase();
+    return { hex: fakeHex, name };
+  });
+}
+
 // ─── EditProductDialog ────────────────────────────────────────────────────────
 // Dialog that lets the user edit a product's fields.
+// Colors section mirrors AddProductWindow: preset swatches + hex picker + chips.
 // Only submits fields that actually changed (dirty check).
 // ─────────────────────────────────────────────────────────────────────────────
 function buildInitialForm(product) {
   return {
     title: product.title,
     description: product.description,
-    price: product.price,
+    price: String(product.price),
     promo: product.promo ?? "",
     categoryId: String(product.categoryId),
-    colors: product.colors.join(", "),
+    // Convert string names → { hex, name }[] using the helper above
+    selectedColors: colorsArrayToSelected(product.colors),
     sizes: [...product.sizes],
   };
 }
@@ -63,12 +130,19 @@ function EditProductDialog({ product, open, onOpenChange }) {
   const [form, setForm] = useState(() => buildInitialForm(product));
   const [errors, setErrors] = useState({});
 
+  /** Tracks the value of the hex-picker input (not yet committed) */
+  const [pickerHex, setPickerHex] = useState("#e11d48");
+  /** Optional custom name the admin types before hitting "Add" */
+  const [pickerName, setPickerName] = useState("");
+
   // Re-sync form state whenever the dialog is opened (or product data changes),
   // so that re-opening the dialog after a save always shows fresh data.
   useEffect(() => {
     if (open) {
       setForm(buildInitialForm(product));
       setErrors({});
+      setPickerHex("#e11d48");
+      setPickerName("");
     }
   }, [open, product]);
 
@@ -89,13 +163,58 @@ function EditProductDialog({ product, open, onOpenChange }) {
     }));
   }
 
+  // ── Color helpers (identical to AddProductWindow) ──────────────────────────
+  function togglePresetColor(hex, label) {
+    const key = hex.toUpperCase();
+    setForm((prev) => {
+      const already = prev.selectedColors.some((c) => c.hex === key);
+      return {
+        ...prev,
+        selectedColors: already
+          ? prev.selectedColors.filter((c) => c.hex !== key)
+          : [...prev.selectedColors, { hex: key, name: label }],
+      };
+    });
+  }
+
+  function addPickerColor() {
+    const key = pickerHex.toUpperCase();
+    const name = pickerName.trim() || key;
+    setForm((prev) => {
+      if (prev.selectedColors.some((c) => c.hex === key)) return prev;
+      return {
+        ...prev,
+        selectedColors: [...prev.selectedColors, { hex: key, name }],
+      };
+    });
+    setPickerName("");
+  }
+
+  function removeColor(hex) {
+    const key = hex.toUpperCase();
+    setForm((prev) => ({
+      ...prev,
+      selectedColors: prev.selectedColors.filter((c) => c.hex !== key),
+    }));
+  }
+
+  function renameColor(hex, newName) {
+    const key = hex.toUpperCase();
+    setForm((prev) => ({
+      ...prev,
+      selectedColors: prev.selectedColors.map((c) =>
+        c.hex === key ? { ...c, name: newName } : c
+      ),
+    }));
+  }
+
   // ── dirty check: only send changed fields ──────────────────────────────────
   function buildPayload() {
     const payload = {};
 
     if (form.title.trim() !== product.title) payload.title = form.title.trim();
     if (form.description.trim() !== product.description) payload.description = form.description.trim();
-    if (form.price.trim() !== product.price) payload.price = form.price.trim();
+    if (form.price.trim() !== String(product.price)) payload.price = form.price.trim();
 
     const promoVal = form.promo.trim() === "" ? null : form.promo.trim();
     if (promoVal !== product.promo) payload.promo = promoVal;
@@ -103,12 +222,21 @@ function EditProductDialog({ product, open, onOpenChange }) {
     const catId = parseInt(form.categoryId, 10);
     if (catId !== product.categoryId) payload.categoryId = catId;
 
-    const colors = form.colors.split(",").map((c) => c.trim()).filter(Boolean);
-    if (JSON.stringify(colors) !== JSON.stringify(product.colors)) payload.colors = colors;
+    // Derive color name strings to send to the backend
+    const colors = form.selectedColors.map((c) => c.name || c.hex);
+    const colorsChanged = JSON.stringify(colors) !== JSON.stringify(product.colors);
+    if (colorsChanged) payload.colors = colors;
 
     const sortedDraft = [...form.sizes].sort();
     const sortedOrig = [...product.sizes].sort();
-    if (JSON.stringify(sortedDraft) !== JSON.stringify(sortedOrig)) payload.sizes = form.sizes;
+    const sizesChanged = JSON.stringify(sortedDraft) !== JSON.stringify(sortedOrig);
+    if (sizesChanged) payload.sizes = form.sizes;
+
+    // Always send both colors and sizes together so the backend never
+    // receives one without the other, which could cause it to clear the
+    // missing field (e.g. clearing colors when only sizes changed).
+    if (sizesChanged && !colorsChanged) payload.colors = colors;
+    if (colorsChanged && !sizesChanged) payload.sizes = form.sizes;
 
     return payload;
   }
@@ -185,7 +313,9 @@ function EditProductDialog({ product, open, onOpenChange }) {
         >
           {/* ── Title ──────────────────────────────────────────────────── */}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`ep-title-${product.id}`}>Title <span className="text-destructive">*</span></Label>
+            <Label htmlFor={`ep-title-${product.id}`}>
+              Title <span className="text-destructive">*</span>
+            </Label>
             <Input
               id={`ep-title-${product.id}`}
               type="text"
@@ -205,7 +335,9 @@ function EditProductDialog({ product, open, onOpenChange }) {
 
           {/* ── Description ────────────────────────────────────────────── */}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`ep-desc-${product.id}`}>Description <span className="text-destructive">*</span></Label>
+            <Label htmlFor={`ep-desc-${product.id}`}>
+              Description <span className="text-destructive">*</span>
+            </Label>
             <textarea
               id={`ep-desc-${product.id}`}
               value={form.description}
@@ -225,7 +357,9 @@ function EditProductDialog({ product, open, onOpenChange }) {
           {/* ── Price + Promo ───────────────────────────────────────────── */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor={`ep-price-${product.id}`}>Price <span className="text-destructive">*</span></Label>
+              <Label htmlFor={`ep-price-${product.id}`}>
+                Price <span className="text-destructive">*</span>
+              </Label>
               <Input
                 id={`ep-price-${product.id}`}
                 type="number"
@@ -245,7 +379,10 @@ function EditProductDialog({ product, open, onOpenChange }) {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor={`ep-promo-${product.id}`}>Promo Price <span className="text-muted-foreground text-xs">(optional)</span></Label>
+              <Label htmlFor={`ep-promo-${product.id}`}>
+                Promo Price{" "}
+                <span className="text-muted-foreground text-xs">(optional)</span>
+              </Label>
               <Input
                 id={`ep-promo-${product.id}`}
                 type="number"
@@ -267,7 +404,9 @@ function EditProductDialog({ product, open, onOpenChange }) {
 
           {/* ── Category ───────────────────────────────────────────────── */}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`ep-category-${product.id}`}>Category <span className="text-destructive">*</span></Label>
+            <Label htmlFor={`ep-category-${product.id}`}>
+              Category <span className="text-destructive">*</span>
+            </Label>
             <Select
               value={form.categoryId}
               onValueChange={(val) => setField("categoryId", val)}
@@ -296,16 +435,241 @@ function EditProductDialog({ product, open, onOpenChange }) {
           </div>
 
           {/* ── Colors ─────────────────────────────────────────────────── */}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`ep-colors-${product.id}`}>Colors (comma-separated)</Label>
-            <Input
-              id={`ep-colors-${product.id}`}
-              type="text"
-              value={form.colors}
-              onChange={(e) => setField("colors", e.target.value)}
-              disabled={isPending}
-              autoComplete="off"
-            />
+          <div className="flex flex-col gap-3">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <Label>
+                Colors{" "}
+                <span className="text-xs font-normal text-muted-foreground">
+                  (optional)
+                </span>
+              </Label>
+              {form.selectedColors.length > 0 && (
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {form.selectedColors.length} selected
+                </span>
+              )}
+            </div>
+
+            {/* ── Card ── */}
+            <div className="rounded-lg border border-input bg-muted/20 p-4 flex flex-col gap-4">
+              {/* ── Preset swatches ── */}
+              <div className="flex flex-col gap-2">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
+                  Presets
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {PRESET_COLORS.map(({ hex, label }) => {
+                    const key = hex.toUpperCase();
+                    const isSelected = form.selectedColors.some((c) => c.hex === key);
+                    const light = isLightHex(hex);
+                    return (
+                      <button
+                        key={hex}
+                        type="button"
+                        title={label}
+                        aria-label={`${label} — ${isSelected ? "remove" : "add"}`}
+                        aria-pressed={isSelected}
+                        disabled={isPending}
+                        onClick={() => togglePresetColor(hex, label)}
+                        style={{ backgroundColor: hex }}
+                        className={[
+                          "relative size-8 rounded-full transition-all duration-150 shrink-0",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                          "disabled:pointer-events-none disabled:opacity-40",
+                          isSelected
+                            ? light
+                              ? "ring-2 ring-offset-2 ring-black scale-110 shadow-md"
+                              : "ring-2 ring-offset-2 ring-primary scale-110 shadow-md"
+                            : light
+                              ? "border border-border/70 hover:scale-110 hover:shadow-sm"
+                              : "hover:scale-110 hover:shadow-sm",
+                        ].join(" ")}
+                      >
+                        {isSelected && (
+                          <span
+                            className={[
+                              "absolute inset-0 flex items-center justify-center text-[10px] font-black",
+                              light ? "text-black" : "text-white",
+                            ].join(" ")}
+                            aria-hidden="true"
+                          >
+                            ✓
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* ── Divider ── */}
+              <div className="h-px bg-border/60" />
+
+              {/* ── Custom color picker ── */}
+              <div className="flex flex-col gap-3">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
+                  Custom color
+                </p>
+
+                {/* Row: swatch + hex badge */}
+                <div className="flex items-center gap-3">
+                  {/* Color wheel swatch */}
+                  <div className="relative shrink-0">
+                    <div
+                      className="size-11 rounded-xl border-2 border-input shadow-sm cursor-pointer transition-transform hover:scale-105"
+                      style={{ backgroundColor: pickerHex }}
+                      aria-hidden="true"
+                    />
+                    <input
+                      type="color"
+                      value={pickerHex}
+                      onChange={(e) => setPickerHex(e.target.value)}
+                      disabled={isPending}
+                      aria-label="Open color wheel"
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:pointer-events-none"
+                    />
+                  </div>
+
+                  {/* Info stack */}
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-xs font-mono font-medium text-foreground">
+                      {pickerHex.toUpperCase()}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      Click swatch to change
+                    </span>
+                  </div>
+                </div>
+
+                {/* Name input row */}
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    htmlFor={`ep-custom-color-name-${product.id}`}
+                    className="text-xs font-medium text-foreground"
+                  >
+                    Color name{" "}
+                    <span className="font-normal text-muted-foreground">
+                      — give it a name or leave blank to use the hex code
+                    </span>
+                  </label>
+                  <div className="flex gap-2">
+                    <Input
+                      id={`ep-custom-color-name-${product.id}`}
+                      type="text"
+                      placeholder={`e.g. "Dusty Rose" or leave blank`}
+                      value={pickerName}
+                      onChange={(e) => setPickerName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addPickerColor();
+                        }
+                      }}
+                      disabled={isPending}
+                      className="h-9 text-sm flex-1"
+                      autoComplete="off"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={
+                        isPending ||
+                        form.selectedColors.some(
+                          (c) => c.hex === pickerHex.toUpperCase()
+                        )
+                      }
+                      onClick={addPickerColor}
+                      className="shrink-0 h-9 px-4 gap-1.5"
+                    >
+                      <Plus className="size-3.5" aria-hidden="true" />
+                      Add
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Selected color chips ── */}
+            {form.selectedColors.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
+                  Selected — click a name to rename it
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {form.selectedColors.map(({ hex, name }) => {
+                    const light = isLightHex(hex);
+                    const isUnnamed = name === hex.toUpperCase();
+                    return (
+                      <div
+                        key={hex}
+                        className={[
+                          "group flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-full border bg-background shadow-sm text-xs font-medium",
+                          isUnnamed
+                            ? "border-amber-400/60 ring-1 ring-amber-400/40"
+                            : "border-border",
+                        ].join(" ")}
+                      >
+                        {/* Color dot */}
+                        <span
+                          className={[
+                            "inline-flex shrink-0 size-4 rounded-full border",
+                            light ? "border-border" : "border-transparent",
+                          ].join(" ")}
+                          style={{ backgroundColor: hex }}
+                          aria-hidden="true"
+                        />
+
+                        {/* Inline editable name */}
+                        <input
+                          type="text"
+                          value={name}
+                          onChange={(e) => renameColor(hex, e.target.value)}
+                          disabled={isPending}
+                          aria-label={`Rename color ${name}`}
+                          title={
+                            isUnnamed
+                              ? "This color has no name — click to rename"
+                              : undefined
+                          }
+                          placeholder="Name…"
+                          className={[
+                            "bg-transparent border-none outline-none text-xs disabled:pointer-events-none",
+                            "focus:underline focus:underline-offset-2 cursor-text",
+                            isUnnamed
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-foreground",
+                          ].join(" ")}
+                          style={{ width: `${Math.max(name.length + 1, 7)}ch` }}
+                        />
+
+                        {/* Remove button */}
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() => removeColor(hex)}
+                          aria-label={`Remove ${name}`}
+                          className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:pointer-events-none ml-0.5"
+                        >
+                          <X className="size-3" aria-hidden="true" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Hint if any chip is unnamed */}
+                {form.selectedColors.some(
+                  (c) => c.name === c.hex.toUpperCase()
+                ) && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                    <span aria-hidden="true">⚠</span>
+                    Some colors have no name — click the highlighted chip to rename them.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ── Sizes ──────────────────────────────────────────────────── */}
