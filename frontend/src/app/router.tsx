@@ -7,9 +7,10 @@ import CategoriesPage  from "@/pages/Categories";
 import ProductsPage    from "@/pages/Products";
 // import OrdersPage      from "@/pages/Orders";
 import CouponsPage     from "@/pages/Coupons";
-// import ShippingsPage   from "@/pages/Shippings";
-// import WilayaPage      from "@/pages/Willaya";
-// import CommunePage     from "@/pages/Commune";
+import ShippingsPage   from "@/pages/Shippings";
+import ShippingPricesPage from "@/pages/ShippingPrices";
+import WilayaPage      from "@/pages/Willaya";
+import CommunePage     from "@/pages/Commune";
 // import SettingsPage    from "@/pages/Settings";
 
 import { AuthGuard, AuthInitializer } from "@/features/auth";
@@ -50,9 +51,10 @@ const router = createBrowserRouter([
           { path: "/categories",element: <CategoriesPage /> },
           // { path: "/orders",    element: <OrdersPage /> },
           { path: "/coupons",   element: <CouponsPage /> },
-          // { path: "/shippings", element: <ShippingsPage /> },
-          // { path: "/wilaya",    element: <WilayaPage /> },
-          // { path: "/commune",   element: <CommunePage /> },
+          { path: "/shippings", element: <ShippingsPage /> },
+          { path: "/shippings/:companyId", element: <ShippingPricesPage /> },
+          { path: "/wilaya",    element: <WilayaPage /> },
+          { path: "/commune/:wilayaCode", element: <CommunePage /> },
           // { path: "/settings",  element: <SettingsPage /> },
         ],
       },
