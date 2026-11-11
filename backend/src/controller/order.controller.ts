@@ -6,6 +6,7 @@ import {
   getAllOrdersService,
   updateOrderStatusService,
   deleteOrderByIdService,
+  getOrderStatsService,
   type CreateOrderPayload,
   type UpdateOrderStatusPayload,
   type CreateOrderResult,
@@ -181,7 +182,7 @@ export async function updateOrderStatus(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Hard-deletes an order and returns its last snapshot.
+ * Soft-deletes an order and returns its last snapshot.
  * Returns 200 + the deleted record on success.
  * Returns 404 if no order exists with the given id.
  */
@@ -199,6 +200,36 @@ export async function deleteOrderById(
     if (isNotFound(error)) {
       return next(createHttpError(404, (error as Error).message));
     }
+    next(error);
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/orders/stats
+// Returns store-wide order statistics including total revenue.
+//
+// IMPORTANT: totalRevenue intentionally includes soft-deleted order rows.
+// Soft-deleting an order is a UI archival action — it does NOT reverse the
+// real-world payment that was collected. Excluding those rows would
+// silently under-report the store's actual earnings.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns store-wide order stats:
+ *   - totalRevenue: sum of all confirmed + shipped orders (ever placed, including archived)
+ *   - activeOrderCount: orders visible in the dashboard (soft-deleted excluded)
+ *   - allTimeOrderCount: every order ever placed
+ */
+export async function getOrderStats(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const stats = await getOrderStatsService();
+    res.status(200).json({ success: true, data: stats });
+  } catch (error) {
     next(error);
   }
 }
