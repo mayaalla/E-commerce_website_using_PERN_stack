@@ -6,7 +6,6 @@ import {
   Ticket,
   ClipboardList,
   Truck,
-  MapPin,
   Map,
   Settings,
 } from "lucide-react";
@@ -22,7 +21,6 @@ const NAV_ITEMS = [
   { label: "Coupons",    href: "/coupons",    icon: Ticket },
   { label: "Shippings",  href: "/shippings",  icon: Truck },
   { label: "Wilaya",     href: "/wilaya",     icon: Map },
-  { label: "Commune",    href: "/commune",    icon: MapPin },
   { label: "Settings",   href: "/settings",   icon: Settings },
 ] as const;
 
