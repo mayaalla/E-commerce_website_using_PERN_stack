@@ -128,10 +128,10 @@ router.post("/products", authenticate, authorize("product_add"), createProductHa
 | `category_add` | Create categories |
 | `category_update` | Update categories |
 | `category_delete` | Delete categories |
-| `order_read` | Read/list orders |
+| `order_read` | Read/list orders & stats |
 | `order_add` | Create orders |
 | `order_update` | Update order status |
-| `order_delete` | Delete orders |
+| `order_delete` | Soft-delete orders |
 | `coupon_read` | Read/list coupons |
 | `coupon_add` | Create coupons |
 | `coupon_update` | Update coupons |
@@ -143,7 +143,7 @@ router.post("/products", authenticate, authorize("product_add"), createProductHa
 | `shipping_company_read` | Read shipping companies |
 | `shipping_company_add` | Create shipping companies |
 | `shipping_company_update` | Update shipping companies |
-| `shipping_company_delete` | Delete shipping companies |
+| `shipping_company_delete` | Soft-delete shipping companies |
 | `full_access` | Everything (equivalent to `super_admin`) |
 
 ---
@@ -424,8 +424,9 @@ Delete an admin and return their last snapshot.
 
 ---
 
-
 ## Categories
+
+> **UPDATED** — All endpoints now use **soft-delete**. Deleted categories have a `deletedAt` date string set; `null` means active. Soft-deleted categories are hidden from all list/read endpoints and cannot be updated or re-deleted.
 
 ### POST `/categories`
 
@@ -438,7 +439,7 @@ Delete an admin and return their last snapshot.
 **Response `201`**
 
 ```json
-{ "success": true, "data": { "id": 1, "name": "Clothing" } }
+{ "success": true, "data": { "id": 1, "name": "Clothing", "deletedAt": null } }
 ```
 
 **Errors:** `400` validation, `409` duplicate name.
@@ -447,17 +448,19 @@ Delete an admin and return their last snapshot.
 
 ### GET `/categories`
 
+Returns only **active** (non-deleted) categories.
+
 **Response `200`**
 
 ```json
-{ "success": true, "data": [{ "id": 1, "name": "Clothing" }] }
+{ "success": true, "data": [{ "id": 1, "name": "Clothing", "deletedAt": null }] }
 ```
 
 ---
 
 ### GET `/categories/:id`
 
-**Response `200`** — single category object. **`404`** if not found.
+**Response `200`** — single active category. **`404`** if not found **or soft-deleted**.
 
 ---
 
@@ -465,17 +468,32 @@ Delete an admin and return their last snapshot.
 
 **Request Body:** `{ "name": "string" }`
 
-**Response `200`** — updated category. **`404`** / **`409`** on error.
+**Response `200`** — updated category. **`404`** if not found or soft-deleted. **`409`** on name conflict.
 
 ---
 
-### DELETE `/categories/:id`
+### DELETE `/categories/:id` ✦ UPDATED
 
-**Response `200`** — deleted category. **`404`** if not found.
+**Behaviour changed:** now performs a **soft-delete** — sets `deletedAt` to today's date. The row is preserved in the database.
+
+**Response `200`** — the category record with `deletedAt` stamped.
+
+```json
+{ "success": true, "data": { "id": 1, "name": "Clothing", "deletedAt": "2026-11-09" } }
+```
+
+**Errors**
+
+| Status | Message |
+|---|---|
+| `404` | Not found or already deleted |
+| `409` | Category still has products attached (FK constraint) |
 
 ---
 
 ## Products
+
+> **UPDATED** — All endpoints now use **soft-delete**. Deleted products have a `deletedAt` date string set; `null` means active. Soft-deleted products are hidden from all list/read endpoints, cannot be ordered, and cannot be updated or re-deleted. Products cannot be created under a soft-deleted category.
 
 ### POST `/products/upload/request-tokens`
 
@@ -546,7 +564,8 @@ Create a new product. Images must be uploaded via Cloudinary first using the tok
 }
 ```
 
-> `colors` and `sizes` default to `[]`. `imageUploads` is optional (max 8 entries).
+> `colors` and `sizes` default to `[]`. `imageUploads` is optional (max 8 entries).  
+> **UPDATED:** `categoryId` must reference an **active** (non-soft-deleted) category.
 
 **Response `201`**
 
@@ -562,7 +581,8 @@ Create a new product. Images must be uploaded via Cloudinary first using the tok
     "images": ["https://res.cloudinary.com/..."],
     "colors": ["red"],
     "sizes": ["38", "40"],
-    "categoryId": 1
+    "categoryId": 1,
+    "deletedAt": null
   }
 }
 ```
@@ -572,36 +592,38 @@ Create a new product. Images must be uploaded via Cloudinary first using the tok
 | Status | Message |
 |---|---|
 | `400` | Validation error |
-| `404` | Category not found |
+| `404` | Category not found or deleted |
 | `422` | Promo price exceeds regular price |
 
 ---
 
 ### GET `/products`
 
-List all products (public).
+List all **active** (non-deleted) products (public).
 
-**Response `200`** — array of product objects.
+**Response `200`** — array of product objects (all with `deletedAt: null`).
 
 ---
 
-### GET `/products/by-category/:categoryId`
+### GET `/products/by-category/:categoryId` ✦ UPDATED
 
-Get all products in a given category (public).
+Get all **active** products in a given **active** category (public).
 
 **Params:** `categoryId` — positive integer
 
-**Response `200`** — array of product objects.
+**Response `200`** — array of active product objects.
 
-**Errors:** `404` if category not found.
+**Errors:** `404` if category not found **or soft-deleted**.
+
+> **Fix applied:** The query now performs a proper `INNER JOIN` on categories so both `products.deletedAt` and `categories.deletedAt` are correctly filtered. Previously this endpoint would have thrown a runtime SQL error.
 
 ---
 
 ### GET `/products/:id`
 
-Get a single product (public).
+Get a single **active** product (public).
 
-**Response `200`** — single product object. **`404`** if not found.
+**Response `200`** — single product object. **`404`** if not found **or soft-deleted**.
 
 ---
 
@@ -615,15 +637,31 @@ Partially update a product (all fields optional).
 
 **Response `200`** — updated product.
 
-**Errors:** `404`, `422` (invalid promo).
+**Errors:** `404` (not found or soft-deleted), `422` (invalid promo).
 
 ---
 
-### DELETE `/products/:id`
+### DELETE `/products/:id` ✦ UPDATED
 
 > 🔒 Requires: `authenticate` + `authorize("product_delete")`
 
-**Response `200`** — deleted product snapshot. **`404`** if not found.
+**Behaviour changed:** now performs a **soft-delete** — sets `deletedAt` to today's date. The row is preserved in the database.
+
+**Response `200`** — the product record with `deletedAt` stamped.
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 10,
+    "title": "Red T-Shirt",
+    "deletedAt": "2026-11-09",
+    "..."
+  }
+}
+```
+
+**Errors:** `404` if not found or already soft-deleted.
 
 ---
 
@@ -750,6 +788,8 @@ Get all communes in a wilaya.
 
 ### Shipping Companies
 
+> **UPDATED** — Shipping companies now use **soft-delete**. Deleted companies have `deletedAt` set; active ones have `deletedAt: null`. A soft-deleted company name can be **reused** when creating a new company.
+
 #### POST `/shipping/companies`
 
 **Request Body**
@@ -768,21 +808,25 @@ Get all communes in a wilaya.
 ```json
 {
   "success": true,
-  "data": { "id": 1, "name": "Yalidine", "status": "active" }
+  "data": { "id": 1, "name": "Yalidine", "status": "active", "deletedAt": null }
 }
 ```
+
+**Errors:** `409` if an **active** company with the same name already exists.
 
 ---
 
 #### GET `/shipping/companies`
 
-**Response `200`** — array of `{ id, name, status }` objects.
+Returns only **active** (non-deleted) shipping companies.
+
+**Response `200`** — array of `{ id, name, status, deletedAt }` objects.
 
 ---
 
 #### GET `/shipping/companies/:id`
 
-**Response `200`** — single shipping company. **`404`** if not found.
+**Response `200`** — single active shipping company. **`404`** if not found **or soft-deleted**.
 
 ---
 
@@ -803,23 +847,36 @@ Get all wilaya-level prices for a shipping company.
 
 ---
 
-#### PUT `/shipping/companies/:id`
+#### PUT `/shipping/companies/:id` ✦ UPDATED
 
 **Request Body** — `{ "name"?: "string", "apiKey"?: "string" }` (all optional)
 
-**Response `200`** — updated company. **`404`** if not found.
+**Response `200`** — updated company. **`404`** if not found or soft-deleted.
+
+> **UPDATED:** Name uniqueness check now ignores soft-deleted companies — a previously-used name can be reused.
 
 ---
 
-#### DELETE `/shipping/companies/:id`
+#### DELETE `/shipping/companies/:id` ✦ UPDATED
 
-**Response `200`** — deleted company. **`404`** if not found.
+**Behaviour changed:** now performs a **soft-delete** — sets `deletedAt` to today's date. The row is preserved in the database.
+
+**Response `200`** — the company record with `deletedAt` stamped.
+
+**Errors**
+
+| Status | Message |
+|---|---|
+| `404` | Not found or already deleted |
+| `409` | Company still has orders or shipping prices referencing it (FK constraint) |
 
 ---
 
 ### Shipping Prices
 
 Prices are set **per company × wilaya pair** (unique constraint).
+
+> **Note:** Shipping price rows use **hard-delete** (no `deletedAt` column). They are configuration data — deleting a price row permanently removes it.
 
 #### POST `/shipping/prices`
 
@@ -862,11 +919,22 @@ List all shipping prices.
 
 ---
 
-#### GET `/shipping/prices/by-company-wilaya`
+#### GET `/shipping/prices/lookup`
 
-Get the price for a specific company + wilaya combination.
+Get the price for a specific company + wilaya combination using query parameters.
 
-**Query Params:** `companyId=1&wilayaCode=16`
+**Query Params (use one of each pair):**
+
+| Param | Type | Description |
+|---|---|---|
+| `companyId` | number | Resolve company by its numeric id |
+| `companyName` | string | Resolve company by its name |
+| `wilayaCode` | string | Resolve wilaya by its 2-digit code (e.g. `"16"`) |
+| `wilayaName` | string | Resolve wilaya by its human-readable name (e.g. `"Alger"`) |
+
+**Examples:**
+- `GET /api/shipping/prices/lookup?companyId=1&wilayaCode=16`
+- `GET /api/shipping/prices/lookup?companyName=Yalidine&wilayaName=Alger`
 
 **Response `200`** — single shipping price object. **`404`** if not found.
 
@@ -882,7 +950,7 @@ Get the price for a specific company + wilaya combination.
 
 #### DELETE `/shipping/prices/:id`
 
-**Response `200`** — deleted price. **`404`** if not found.
+**Response `200`** — deleted price snapshot. **`404`** if not found.
 
 ---
 
@@ -1004,11 +1072,15 @@ Validate a coupon code at checkout **(public — no auth required)**. Checks tha
 
 ## Orders
 
+> **UPDATED** — Orders now use **soft-delete**. `GET /orders` only returns active orders. Revenue statistics must be fetched from the dedicated `GET /orders/stats` endpoint, which correctly includes soft-deleted orders in the revenue total (since the payment was already collected).
+
 ### POST `/orders`
 
 Place a new customer order **(public — no auth required)**.
 
 > ⚠️ The server recomputes `total` from live product prices. The client **must not** send a `total` field — the authoritative value is always computed server-side, preventing price-manipulation attacks.
+
+> **UPDATED:** Soft-deleted products **cannot** be ordered. Attempting to order a deleted product returns `404`.
 
 **Request Body**
 
@@ -1054,7 +1126,8 @@ Place a new customer order **(public — no auth required)**.
       ],
       "date": "2026-11-08",
       "hour": "19:34:00",
-      "status": "pending"
+      "status": "pending",
+      "deletedAt": null
     },
     "pricing": {
       "subtotal": "599.98",
@@ -1075,7 +1148,7 @@ Place a new customer order **(public — no auth required)**.
 | Status | Message |
 |---|---|
 | `400` | Validation error |
-| `404` | Wilaya / commune / shipping company / product not found |
+| `404` | Wilaya / commune / shipping company / product not found (or soft-deleted) |
 | `400` | Coupon not found or unavailable |
 | `422` | Shipping price not configured for that wilaya + company |
 
@@ -1085,9 +1158,51 @@ Place a new customer order **(public — no auth required)**.
 
 > 🔒 Requires: `authenticate` + `authorize("order_read")`
 
-Get all orders, most-recent first.
+Get all **active** (non-soft-deleted) orders, most-recent first.
 
-**Response `200`** — array of order objects.
+**Response `200`** — array of active order objects.
+
+> ⚠️ **UPDATED:** Soft-deleted orders are **excluded** from this list. Use `GET /orders/stats` to get revenue totals that include all orders.
+
+---
+
+### GET `/orders/stats` ✦ NEW
+
+> 🔒 Requires: `authenticate` + `authorize("order_read")`
+
+Returns store-wide order statistics for the **admin dashboard**.
+
+> ⚠️ **Important:** `totalRevenue` deliberately includes **soft-deleted orders**. Soft-deleting an order is a UI archival action — the payment was already collected. Excluding those rows would silently under-report the store's actual earnings.  
+> Only orders with revenue-generating statuses (`confirmed`, `shipped`) are summed.
+
+**Response `200`**
+
+```json
+{
+  "success": true,
+  "data": {
+    "totalRevenue": "158420.50",
+    "activeOrderCount": 312,
+    "allTimeOrderCount": 347
+  }
+}
+```
+
+| Field | Description | Soft-deleted included? |
+|---|---|---|
+| `totalRevenue` | Sum of all `confirmed` + `shipped` orders (all time) | ✅ Yes |
+| `activeOrderCount` | Orders visible in the dashboard | ❌ No |
+| `allTimeOrderCount` | Every order ever placed | ✅ Yes |
+
+**Status → revenue inclusion:**
+
+| Status | Counts toward revenue? |
+|---|---|
+| `confirmed` | ✅ Yes |
+| `shipped` | ✅ Yes |
+| `pending` | ❌ No |
+| `canceled` | ❌ No |
+| `returned` | ❌ No |
 
 ---
 
@@ -1095,7 +1210,7 @@ Get all orders, most-recent first.
 
 > 🔒 Requires: `authenticate` + `authorize("order_read")`
 
-**Response `200`** — single order object. **`404`** if not found.
+**Response `200`** — single active order object. **`404`** if not found **or soft-deleted**.
 
 ---
 
@@ -1123,13 +1238,29 @@ Update an order's status. Orders in a terminal state (`canceled`, `returned`) ca
 
 ---
 
-### DELETE `/orders/:id`
+### DELETE `/orders/:id` ✦ UPDATED
 
 > 🔒 Requires: `authenticate` + `authorize("order_delete")`
 
-Hard-delete an order and return its last snapshot.
+**Behaviour changed:** now performs a **soft-delete** — sets `deletedAt` to today's date. The row is preserved for auditing and revenue reporting.
 
-**Response `200`** — deleted order. **`404`** if not found.
+**Response `200`** — the order record with `deletedAt` stamped.
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 42,
+    "name": "Amira Benali",
+    "total": "1049.99",
+    "status": "pending",
+    "deletedAt": "2026-11-09",
+    "..."
+  }
+}
+```
+
+**Errors:** `404` if not found or already soft-deleted.
 
 ---
 
