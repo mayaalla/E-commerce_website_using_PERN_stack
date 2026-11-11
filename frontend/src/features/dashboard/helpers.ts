@@ -1,5 +1,6 @@
 import type {
   Order,
+  OrderStats,
   OrderStatus,
   DateRange,
   KpiData,
@@ -103,18 +104,30 @@ export function computeCancelReturnRate(orders: Order[]): number {
 export function computeKpis(
   currentOrders: Order[],
   prevOrders: Order[],
-  allOrders: Order[]
+  allOrders: Order[],
+  /**
+   * Stats from GET /orders/stats. When provided, authoritative revenue and
+   * order-count totals are taken from the API (they include soft-deleted
+   * orders which are excluded from the GET /orders list).
+   */
+  orderStats?: OrderStats | null
 ): KpiData {
   return {
-    netSales: computeNetSales(currentOrders),
-    netSalesPrev: computeNetSales(prevOrders),
-    orderCount: computeOrderCount(currentOrders),
-    orderCountPrev: computeOrderCount(prevOrders),
-    avgOrderValue: computeAvgOrderValue(currentOrders),
-    avgOrderValuePrev: computeAvgOrderValue(prevOrders),
-    pendingCount: allOrders.filter((o) => o.status === "pending").length,
-    cancelReturnRate: computeCancelReturnRate(currentOrders),
-    cancelReturnRatePrev: computeCancelReturnRate(prevOrders),
+    // --- API-authoritative stats (from GET /orders/stats) ---
+    totalRevenue:      orderStats ? parseMoney(orderStats.totalRevenue) : computeNetSales(allOrders),
+    activeOrderCount:  orderStats?.activeOrderCount  ?? allOrders.length,
+    allTimeOrderCount: orderStats?.allTimeOrderCount ?? allOrders.length,
+
+    // --- Range-scoped stats computed from the active-orders list ---
+    netSales:              computeNetSales(currentOrders),
+    netSalesPrev:          computeNetSales(prevOrders),
+    orderCount:            computeOrderCount(currentOrders),
+    orderCountPrev:        computeOrderCount(prevOrders),
+    avgOrderValue:         computeAvgOrderValue(currentOrders),
+    avgOrderValuePrev:     computeAvgOrderValue(prevOrders),
+    pendingCount:          allOrders.filter((o) => o.status === "pending").length,
+    cancelReturnRate:      computeCancelReturnRate(currentOrders),
+    cancelReturnRatePrev:  computeCancelReturnRate(prevOrders),
   };
 }
 
