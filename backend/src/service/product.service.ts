@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, isNull, and } from "drizzle-orm";
 
 import { db } from "../db/db.js";
 import { products, categories } from "../db/schema.js";
@@ -46,8 +46,10 @@ export type UpdateProductPayload = Partial<CreateProductPayload>;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Verifies that the referenced category exists before we insert or update a
- * product.  This gives a clear error message instead of a raw FK violation.
+ * Verifies that the referenced category exists AND has not been soft-deleted
+ * before we insert or update a product.  This gives a clear error message
+ * instead of a raw FK violation, and prevents products being filed under a
+ * deleted category.
  */
 async function assertCategoryExists(categoryId: number): Promise<void> {
   const [category] = await db
@@ -56,7 +58,7 @@ async function assertCategoryExists(categoryId: number): Promise<void> {
     .where(eq(categories.id, categoryId))
     .limit(1);
 
-  if (!category) {
+  if (!category || category.deletedAt) {
     throw new Error(`Category with id ${categoryId} not found`);
   }
 }
@@ -149,7 +151,7 @@ export async function getProductByIdService(id: number): Promise<Product> {
     .where(eq(products.id, id))
     .limit(1);
 
-  if (!product) {
+  if (!product || product.deletedAt) {
     throw new Error(`Product with id ${id} not found`);
   }
 
@@ -162,7 +164,7 @@ export async function getProductByIdService(id: number): Promise<Product> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getAllProductsService(): Promise<Product[]> {
-  return db.select().from(products);
+  return db.select().from(products).where(isNull(products.deletedAt));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,9 +178,28 @@ export async function getProductsByCategoryService(
   await assertCategoryExists(categoryId);
 
   return db
-    .select()
+    .select({
+      id: products.id,
+      title: products.title,
+      description: products.description,
+      price: products.price,
+      images: products.images,
+      colors: products.colors,
+      sizes: products.sizes,
+      promo: products.promo,
+      categoryId: products.categoryId,
+      deletedAt: products.deletedAt,
+    })
     .from(products)
-    .where(eq(products.categoryId, categoryId));
+    .innerJoin(categories, eq(products.categoryId, categories.id))
+    // Return only non-deleted products whose category is also not deleted.
+    .where(
+      and(
+        isNull(products.deletedAt),
+        eq(products.categoryId, categoryId),
+        isNull(categories.deletedAt),
+      )
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -197,7 +218,7 @@ export async function updateProductByIdService(
     .where(eq(products.id, id))
     .limit(1);
 
-  if (!existing) {
+  if (!existing || existing.deletedAt) {
     throw new Error(`Product with id ${id} not found`);
   }
 
@@ -245,11 +266,14 @@ export async function deleteProductByIdService(id: number): Promise<Product> {
     .where(eq(products.id, id))
     .limit(1);
 
-  if (!existing) {
+  if (!existing || existing.deletedAt) {
     throw new Error(`Product with id ${id} not found`);
   }
 
-  await db.delete(products).where(eq(products.id, id));
+  await db.update(products)
+    .set({ deletedAt: new Date().toISOString().slice(0, 10) })
+    .where(eq(products.id, id));
+
 
   return existing;
 }
