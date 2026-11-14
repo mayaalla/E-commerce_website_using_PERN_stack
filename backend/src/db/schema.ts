@@ -24,6 +24,10 @@ export const adminPermission = pgEnum("admin_permission", [
   "category_delete",
   "category_add",
   "category_update",
+  "commune_read",
+  "commune_delete",
+  "commune_add",
+  "commune_update",
   "order_read",
   "order_delete",
   "order_add",
@@ -40,6 +44,10 @@ export const adminPermission = pgEnum("admin_permission", [
   "shipping_company_delete",
   "shipping_company_add",
   "shipping_company_update",
+  "wilaya_read",
+  "wilaya_delete",
+  "wilaya_add",
+  "wilaya_update",
   "full_access",
 ]);
 
