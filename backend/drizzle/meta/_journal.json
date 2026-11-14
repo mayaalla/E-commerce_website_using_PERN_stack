@@ -43,6 +43,13 @@
       "when": 1794247649190,
       "tag": "0005_reflective_mimic",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794632837878,
+      "tag": "0006_add_wilaya_commune_permissions",
+      "breakpoints": true
     }
   ]
 }
