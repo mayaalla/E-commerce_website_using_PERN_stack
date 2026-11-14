@@ -5,7 +5,7 @@ import Auth            from "@/pages/Auth";
 import HomePage        from "@/pages/Home";
 import CategoriesPage  from "@/pages/Categories";
 import ProductsPage    from "@/pages/Products";
-// import OrdersPage      from "@/pages/Orders";
+import OrdersPage      from "@/pages/Orders";
 import CouponsPage     from "@/pages/Coupons";
 import ShippingsPage   from "@/pages/Shippings";
 import ShippingPricesPage from "@/pages/ShippingPrices";
@@ -49,7 +49,7 @@ const router = createBrowserRouter([
           { path: "/",   element: <HomePage /> },
           { path: "/products",  element: <ProductsPage /> },
           { path: "/categories",element: <CategoriesPage /> },
-          // { path: "/orders",    element: <OrdersPage /> },
+          { path: "/orders",    element: <OrdersPage /> },
           { path: "/coupons",   element: <CouponsPage /> },
           { path: "/shippings", element: <ShippingsPage /> },
           { path: "/shippings/:companyId", element: <ShippingPricesPage /> },
