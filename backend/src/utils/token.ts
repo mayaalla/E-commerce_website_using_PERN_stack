@@ -242,9 +242,9 @@ export async function deleteRefreshTokenFromRedis(
 export async function blockAccessTokenInRedis(accessToken: string): Promise<void> {
   const decoded = jwt.decode(accessToken) as JwtPayload | null;
 
-  if (!decoded?.exp) {
-    throw new Error("Cannot block access token: missing or undecodable exp claim.");
-  }
+  // If the token is already expired or malformed it cannot be reused anyway –
+  // skip writing to Redis rather than crashing the logout flow.
+  if (!decoded?.exp) return;
 
   const nowSeconds = Math.floor(Date.now() / 1_000);
   const remainingTtl = decoded.exp - nowSeconds;
