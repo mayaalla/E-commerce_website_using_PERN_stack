@@ -36,6 +36,14 @@ const adminPermissions = [
   "order_management",
   "coupon_management",
   "shipping_management",
+  "commune_read",
+  "commune_delete",
+  "commune_add",
+  "commune_update",
+  "wilaya_read",
+  "wilaya_delete",
+  "wilaya_add",
+  "wilaya_update",
   "full_access",
 ] as const;
 
@@ -384,7 +392,8 @@ export const validateUpdateCoupon = validate(updateCouponSchema);
 // ═════════════════════════════════════════════════════════════
 
 // Each item inside an order's products array must match this shape.
-// This mirrors the OrderProduct type defined in schema.ts.
+// The client sends only the selection fields; the server resolves title & price
+// from live product rows — this prevents price-manipulation attacks.
 const orderProductSchema = z.object({
   // The ID of the product as it exists in the products table.
   productId: z
@@ -392,24 +401,20 @@ const orderProductSchema = z.object({
     .int("Product ID must be a whole number")
     .positive("Product ID must be positive"),
 
-  // A snapshot of the product title at the time of purchase.
-  title: z.string().trim().min(1, "Product title is required"),
-
   // How many units the customer is buying.
   quantity: z
     .number()
     .int("Quantity must be a whole number")
     .min(1, "Quantity must be at least 1"),
 
-  // Snapshot of the price paid (decimal string).
-  price: moneySchema,
-
   // Color and size are optional – not every product has them.
   color: z.string().trim().min(1).optional(),
-  size: z.enum(clothingSizes).optional(),
+  size: z.string().trim().min(1).optional(),
 });
 
 // Schema for placing a new order.
+// NOTE: `total` is intentionally absent — the server recomputes it from live
+// product prices so the client can never manipulate the final charge.
 const createOrderSchema = z.object({
   // Customer's full name.
   name: z.string().trim().min(1, "Name is required"),
@@ -433,9 +438,6 @@ const createOrderSchema = z.object({
     .number()
     .int("Shipping company ID must be a whole number")
     .positive("Shipping company ID must be positive"),
-
-  // Total amount charged to the customer (delivery + products).
-  total: moneySchema,
 
   // The cart: at least one product must be present.
   products: z
