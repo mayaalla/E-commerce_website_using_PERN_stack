@@ -13,15 +13,6 @@ import {
 import { validateCouponCodeService } from "./coupon.service.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DB / Transaction union type
-//
-// All private helpers accept either the top-level `db` instance or a Drizzle
-// transaction (`tx`).  Using `Parameters<typeof db.transaction>[0]` extracts
-// the exact callback signature so we never depend on internal Drizzle types.
-// ─────────────────────────────────────────────────────────────────────────────
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
