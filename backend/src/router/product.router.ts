@@ -62,25 +62,33 @@ router.post(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /api/products  (public)
+// GET /api/products
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/", getAllProducts);
+router.get("/", authenticate, authorize("product_read"), getAllProducts);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /api/products/by-category/:categoryId  (public)
+// GET /api/products/by-category/:categoryId
 // MUST be registered before /:id so Express does not interpret "by-category"
 // as a numeric id and reject it early.
 // ─────────────────────────────────────────────────────────────────────────────
 router.get(
   "/by-category/:categoryId",
+  authenticate,
+  authorize("product_read"),
   validateId("categoryId"),
   getProductsByCategory
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /api/products/:id  (public)
+// GET /api/products/:id
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/:id", validateId(), getProductById);
+router.get(
+  "/:id",
+  authenticate,
+  authorize("product_read"),
+  validateId(),
+  getProductById
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PUT /api/products/:id
