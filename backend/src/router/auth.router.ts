@@ -13,9 +13,9 @@ router.post("/login", validateAdminLogin, login);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/auth/logout
-// Requires the authenticate middleware (to be added once implemented).
+// Requires an authenticated admin before the logout controller runs.
 // ─────────────────────────────────────────────────────────────────────────────
-router.post("/logout", logout);
+router.post("/logout", authenticate, logout);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/auth/refresh-token
