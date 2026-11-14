@@ -21,6 +21,8 @@ import {
   validateUpdateShippingPrice,
   validateId,
 } from "../middleware/validation.js";
+import { authenticate } from "../middleware/authentication.js";
+import { authorize } from "../middleware/authirization.js";
 
 const router = Router();
 
@@ -32,18 +34,35 @@ const router = Router();
 // POST /api/shipping/companies
 // Validate body before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
-router.post("/companies", validateCreateShippingCompany, createShippingCompany);
+router.post(
+  "/companies",
+  authenticate,
+  authorize("shipping_company_add"),
+  validateCreateShippingCompany,
+  createShippingCompany
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/shipping/companies
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/companies", getAllShippingCompanies);
+router.get(
+  "/companies",
+  authenticate,
+  authorize("shipping_company_read"),
+  getAllShippingCompanies
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/shipping/companies/:id
 // Validate :id is a positive integer before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/companies/:id", validateId(), getShippingCompanyById);
+router.get(
+  "/companies/:id",
+  authenticate,
+  authorize("shipping_company_read"),
+  validateId(),
+  getShippingCompanyById
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/shipping/companies/:id/prices
@@ -52,6 +71,8 @@ router.get("/companies/:id", validateId(), getShippingCompanyById);
 // ─────────────────────────────────────────────────────────────────────────────
 router.get(
   "/companies/:id/prices",
+  authenticate,
+  authorize("shipping_read"),
   validateId(),
   getAllShippingPricesForCompany
 );
@@ -62,6 +83,8 @@ router.get(
 // ─────────────────────────────────────────────────────────────────────────────
 router.put(
   "/companies/:id",
+  authenticate,
+  authorize("shipping_company_update"),
   validateId(),
   validateUpdateShippingCompany,
   updateShippingCompanyById
@@ -71,7 +94,13 @@ router.put(
 // DELETE /api/shipping/companies/:id
 // Validate :id before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
-router.delete("/companies/:id", validateId(), deleteShippingCompanyById);
+router.delete(
+  "/companies/:id",
+  authenticate,
+  authorize("shipping_company_delete"),
+  validateId(),
+  deleteShippingCompanyById
+);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ███  SHIPPING PRICE ROUTES   /api/shipping/prices
@@ -81,20 +110,37 @@ router.delete("/companies/:id", validateId(), deleteShippingCompanyById);
 // POST /api/shipping/prices
 // Validate body before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
-router.post("/prices", validateCreateShippingPrice, createShippingPrice);
+router.post(
+  "/prices",
+  authenticate,
+  authorize("shipping_add"),
+  validateCreateShippingPrice,
+  createShippingPrice
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/shipping/prices/lookup
 // Query-string lookup: ?companyId=1&wilayaCode=16 | ?companyName=X&wilayaName=Y
 // Must be declared BEFORE /:id so Express does not treat "lookup" as a param.
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/prices/lookup", getShippingPriceByCompanyAndWilaya);
+router.get(
+  "/prices/lookup",
+  authenticate,
+  authorize("shipping_read"),
+  getShippingPriceByCompanyAndWilaya
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/shipping/prices/:id
 // Validate :id is a positive integer before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/prices/:id", validateId(), getShippingPriceById);
+router.get(
+  "/prices/:id",
+  authenticate,
+  authorize("shipping_read"),
+  validateId(),
+  getShippingPriceById
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PUT /api/shipping/prices/:id
@@ -102,6 +148,8 @@ router.get("/prices/:id", validateId(), getShippingPriceById);
 // ─────────────────────────────────────────────────────────────────────────────
 router.put(
   "/prices/:id",
+  authenticate,
+  authorize("shipping_update"),
   validateId(),
   validateUpdateShippingPrice,
   updateShippingPriceById
@@ -111,6 +159,12 @@ router.put(
 // DELETE /api/shipping/prices/:id
 // Validate :id before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
-router.delete("/prices/:id", validateId(), deleteShippingPriceById);
+router.delete(
+  "/prices/:id",
+  authenticate,
+  authorize("shipping_delete"),
+  validateId(),
+  deleteShippingPriceById
+);
 
 export default router;
