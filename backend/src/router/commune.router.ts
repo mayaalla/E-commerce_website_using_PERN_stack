@@ -13,6 +13,8 @@ import {
   validateId,
   validateWilayaCode,
 } from "../middleware/validation.js";
+import { authenticate } from "../middleware/authentication.js";
+import { authorize } from "../middleware/authirization.js";
 
 const router = Router();
 
@@ -20,12 +22,18 @@ const router = Router();
 // POST /api/communes
 // Validate body before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
-router.post("/", validateCreateCommune, createCommune);
+router.post(
+  "/",
+  authenticate,
+  authorize("commune_add"),
+  validateCreateCommune,
+  createCommune
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/communes
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/", getAllCommunes);
+router.get("/", authenticate, authorize("commune_read"), getAllCommunes);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/communes/by-wilaya/:code
@@ -34,6 +42,8 @@ router.get("/", getAllCommunes);
 // ─────────────────────────────────────────────────────────────────────────────
 router.get(
   "/by-wilaya/:code",
+  authenticate,
+  authorize("commune_read"),
   validateWilayaCode("code"),
   getCommunesByWilaya
 );
@@ -42,18 +52,31 @@ router.get(
 // GET /api/communes/:id
 // Validate :id is a positive integer before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/:id", validateId(), getCommuneById);
+router.get(
+  "/:id",
+  authenticate,
+  authorize("commune_read"),
+  validateId(),
+  getCommuneById
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PUT /api/communes/:id
 // Validate :id and request body before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
-router.put("/:id", validateId(), validateUpdateCommune, updateCommuneById);
+router.put(
+  "/:id",
+  authenticate,
+  authorize("commune_update"),
+  validateId(),
+  validateUpdateCommune,
+  updateCommuneById
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DELETE /api/communes/:id
 // Validate :id before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
-router.delete("/:id", validateId(), deleteCommuneById);
+router.delete("/:id", authenticate, authorize("commune_delete"), validateId(), deleteCommuneById);
 
 export default router;
