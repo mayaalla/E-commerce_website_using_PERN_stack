@@ -9,18 +9,22 @@ const addOrder = async (data: CreateOrderRequest): Promise<CreateOrderResponse> 
     } catch (error) {
         if (error instanceof AxiosError) {
             if (error.response) {
-                // Handle the error response from the server
                 const status = error.response.status;
-                const message = error.response.data?.message || "An error occurred while adding the order.";
+                // The backend returns either { message: "..." } or { errors: ["..."] }
+                const responseData = error.response.data;
+                const message =
+                    responseData?.message ||
+                    (Array.isArray(responseData?.errors) && responseData.errors.length > 0
+                        ? responseData.errors.join(", ")
+                        : "An error occurred while adding the order.");
                 throw new Error(`Add order failed with status ${status}: ${message}`);
             } else {
-                // Handle network or other errors
+                // Network / no response (e.g. server is down)
                 throw new Error("Network error occurred while adding the order.");
             }
-        } else {
-            // Handle unexpected errors
-            throw new Error("An unexpected error occurred while adding the order.");
         }
+        // Re-throw anything that's already a transformed API error from the interceptor
+        throw error;
     }
 };
 
