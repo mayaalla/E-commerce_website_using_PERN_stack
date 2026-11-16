@@ -3,6 +3,7 @@ export { default as LoginForm }       from "./components/LoginForm";
 export { default as LogoutButton }    from "./components/LogoutButton";
 export { default as AuthGuard }       from "./components/AuthGuard";
 export { default as AuthInitializer } from "./components/AuthInitializer";
+export { default as PermissionGuard } from "./components/PermissionGuard";
 export { default as FormInput }       from "./components/FormInput";
 
 export { default as useAuthStore }    from "./store/auth.store";
@@ -11,6 +12,10 @@ export { default as useAuthStore }    from "./store/auth.store";
 export { useLogin }      from "./hooks/useLogin";
 export { useLogout }     from "./hooks/useLogout";
 export { useAuthStatus } from "./hooks/useAuthStatus";
+export { useCurrentAdmin } from "./hooks/useCurrentAdmin";
+
+export { canAccessPage } from "./permissions";
+export type { AdminProfile, ProtectedPage } from "./permissions";
 
 export { login }  from "./api/login";
 export { logout } from "./api/logout";
