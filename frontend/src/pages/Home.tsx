@@ -75,10 +75,10 @@ import type { DateRange, Order } from "@/features/dashboard/types";
 
 // ─── Permission helpers ───────────────────────────────────────────────────────
 
-function canManageOrders(admin: { type: string; permission: string[] } | null): boolean {
+function canManageOrders(admin: { type: string; permissions: string[] } | null | undefined): boolean {
   if (!admin) return false;
   if (admin.type === "super_admin") return true;
-  return admin.permission.includes("full_access") || admin.permission.includes("order_management");
+  return admin.permissions.includes("full_access") || admin.permissions.includes("order_management");
 }
 
 // ─── Date Range Selector ──────────────────────────────────────────────────────
