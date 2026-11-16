@@ -7,26 +7,28 @@ import {
   ClipboardList,
   Truck,
   Map,
-  Settings,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { LogoutButton } from "@/features/auth";
+import { canAccessPage, LogoutButton, useCurrentAdmin } from "@/features/auth";
 
 // ─── Nav items (excluding auth) ──────────────────────────────────────────────
 const NAV_ITEMS = [
-  { label: "Dashboard",  href: "/",           icon: LayoutDashboard },
-  { label: "Products",   href: "/products",   icon: ShoppingBag },
-  { label: "Categories", href: "/categories", icon: Tag },
-  { label: "Orders",     href: "/orders",     icon: ClipboardList },
-  { label: "Coupons",    href: "/coupons",    icon: Ticket },
-  { label: "Shippings",  href: "/shippings",  icon: Truck },
-  { label: "Wilaya",     href: "/wilaya",     icon: Map },
-  { label: "Settings",   href: "/settings",   icon: Settings },
+  { label: "Dashboard",  href: "/",           icon: LayoutDashboard, page: "dashboard" },
+  { label: "Products",   href: "/products",   icon: ShoppingBag,     page: "products" },
+  { label: "Categories", href: "/categories", icon: Tag,              page: "categories" },
+  { label: "Orders",     href: "/orders",     icon: ClipboardList,    page: "orders" },
+  { label: "Coupons",    href: "/coupons",    icon: Ticket,           page: "coupons" },
+  { label: "Shippings",  href: "/shippings",  icon: Truck,            page: "shippings" },
+  { label: "Wilaya",     href: "/wilaya",     icon: Map,              page: "wilaya" },
+  { label: "Admins",     href: "/admins",     icon: Users,            page: "admins" },
 ] as const;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function DashboardNav() {
   const location = useLocation();
+  const { admin } = useCurrentAdmin();
+  const visibleItems = NAV_ITEMS.filter(({ page }) => canAccessPage(admin, page));
 
   return (
     <aside className="flex h-screen w-60 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
@@ -41,7 +43,7 @@ export default function DashboardNav() {
       {/* Nav links */}
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         <ul className="space-y-0.5">
-          {NAV_ITEMS.map(({ label, href, icon: Icon }) => {
+          {visibleItems.map(({ label, href, icon: Icon }) => {
             const isActive =
               href === "/"
                 ? location.pathname === "/"
