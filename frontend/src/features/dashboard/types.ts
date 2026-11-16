@@ -73,8 +73,8 @@ export interface AdminUser {
   id: number;
   username: string;
   phoneNumber: string;
-  permission: string[];
-  type: string;
+  permissions: string[];
+  type: "super_admin" | "regular_admin";
 }
 
 // ─── API Response wrappers ────────────────────────────────────────────────────
