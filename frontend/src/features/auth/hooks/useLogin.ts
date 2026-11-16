@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 
@@ -21,6 +21,7 @@ export function useLogin() {
   const setAccessToken = useAuthStore((s) => s.setAccessToken);
   const setStatus      = useAuthStore((s) => s.setStatus);
   const navigate       = useNavigate();
+  const queryClient    = useQueryClient();
 
   const mutation = useMutation({
     mutationFn: (data: LoginRequest) => login(data),
@@ -29,8 +30,9 @@ export function useLogin() {
       tokenStore.set(accessToken);
       setAccessToken(accessToken);
       setStatus("authenticated");
+      void queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
       toast.success("Welcome back!");
-      navigate("/categories", { replace: true });
+      navigate("/", { replace: true });
     },
   });
 
