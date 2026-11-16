@@ -11,9 +11,10 @@ import ShippingsPage   from "@/pages/Shippings";
 import ShippingPricesPage from "@/pages/ShippingPrices";
 import WilayaPage      from "@/pages/Willaya";
 import CommunePage     from "@/pages/Commune";
+import AdminsPage      from "@/pages/Admins";
 // import SettingsPage    from "@/pages/Settings";
 
-import { AuthGuard, AuthInitializer } from "@/features/auth";
+import { AuthGuard, AuthInitializer, PermissionGuard } from "@/features/auth";
 import DashboardLayout from "@/components/DashboardLayout";
 
 // ─── Root Layout ─────────────────────────────────────────────────────────────
@@ -45,17 +46,51 @@ const router = createBrowserRouter([
         ),
         children: [
           // Home dashboard
-          { index: true, element: <HomePage /> },
-          { path: "/",   element: <HomePage /> },
-          { path: "/products",  element: <ProductsPage /> },
-          { path: "/categories",element: <CategoriesPage /> },
-          { path: "/orders",    element: <OrdersPage /> },
-          { path: "/coupons",   element: <CouponsPage /> },
-          { path: "/shippings", element: <ShippingsPage /> },
-          { path: "/shippings/:companyId", element: <ShippingPricesPage /> },
-          { path: "/wilaya",    element: <WilayaPage /> },
-          { path: "/commune/:wilayaCode", element: <CommunePage /> },
-          // { path: "/settings",  element: <SettingsPage /> },
+          {
+            index: true,
+            element: <PermissionGuard page="dashboard"><HomePage /></PermissionGuard>,
+          },
+          {
+            path: "/",
+            element: <PermissionGuard page="dashboard"><HomePage /></PermissionGuard>,
+          },
+          {
+            path: "/products",
+            element: <PermissionGuard page="products"><ProductsPage /></PermissionGuard>,
+          },
+          {
+            path: "/categories",
+            element: <PermissionGuard page="categories"><CategoriesPage /></PermissionGuard>,
+          },
+          {
+            path: "/orders",
+            element: <PermissionGuard page="orders"><OrdersPage /></PermissionGuard>,
+          },
+          {
+            path: "/coupons",
+            element: <PermissionGuard page="coupons"><CouponsPage /></PermissionGuard>,
+          },
+          {
+            path: "/shippings",
+            element: <PermissionGuard page="shippings"><ShippingsPage /></PermissionGuard>,
+          },
+          {
+            path: "/shippings/:companyId",
+            element: <PermissionGuard page="shippingPrices"><ShippingPricesPage /></PermissionGuard>,
+          },
+          {
+            path: "/wilaya",
+            element: <PermissionGuard page="wilaya"><WilayaPage /></PermissionGuard>,
+          },
+          {
+            path: "/commune/:wilayaCode",
+            element: <PermissionGuard page="commune"><CommunePage /></PermissionGuard>,
+          },
+          {
+            path: "/admins",
+            element: <PermissionGuard page="admins"><AdminsPage /></PermissionGuard>,
+          },
+          // { path: "/admins",  element: <SettingsPage /> },
         ],
       },
     ],
