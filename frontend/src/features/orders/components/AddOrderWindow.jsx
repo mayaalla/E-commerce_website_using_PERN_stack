@@ -6,6 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -16,6 +23,10 @@ import {
 } from "@/components/ui/dialog";
 
 import { useAddOrder } from "@/features/orders";
+import { useGetProducts } from "@/features/products";
+import { useGetShippingCompanies } from "@/features/shippings";
+import { useGetCommunesByWilaya } from "@/features/communes/hooks/useGetCommunesByWilaya";
+import { useGetWilayas } from "@/features/wilaya";
 
 // ─── constants ────────────────────────────────────────────────────────────────
 const PHONE_RE = /^0\d{9}$/;
@@ -32,6 +43,163 @@ const EMPTY_FORM = {
   products: [{ ...EMPTY_ITEM }],
 };
 
+// ─── ProductItemRow ───────────────────────────────────────────────────────────
+// Isolated row so each item can derive its available colors/sizes from the
+// selected product without re-rendering siblings.
+// ─────────────────────────────────────────────────────────────────────────────
+function ProductItemRow({ item, index, errors, allProducts, onChangeItem, onRemove, canRemove }) {
+  // Resolve the full product object for the selected productId
+  const selectedProduct = allProducts.find((p) => String(p.id) === String(item.productId)) ?? null;
+  const availableColors = selectedProduct?.colors ?? [];
+  const availableSizes = selectedProduct?.sizes ?? [];
+
+  function handleProductChange(val) {
+    // Reset color & size when product changes so stale values are cleared
+    onChangeItem(index, "productId", val);
+    onChangeItem(index, "color", "");
+    onChangeItem(index, "size", "");
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-3">
+      {/* Row header */}
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground">Item {index + 1}</span>
+        {canRemove && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => onRemove(index)}
+            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            aria-label={`Remove item ${index + 1}`}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {/* ── Product selector ── */}
+        <div className="col-span-2 sm:col-span-1 space-y-1">
+          <Label className="text-xs">Product</Label>
+          <Select
+            value={String(item.productId)}
+            onValueChange={handleProductChange}
+          >
+            <SelectTrigger
+              className="w-full"
+              aria-invalid={!!errors[`products[${index}].productId`]}
+            >
+              <SelectValue placeholder="Select product…" />
+            </SelectTrigger>
+            <SelectContent>
+              {allProducts.length === 0 ? (
+                <p className="px-2 py-3 text-xs text-muted-foreground text-center">
+                  No products found
+                </p>
+              ) : (
+                allProducts.map((p) => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    {p.title}
+                  </SelectItem>
+                ))
+              )}
+            </SelectContent>
+          </Select>
+          {errors[`products[${index}].productId`] && (
+            <p className="text-xs text-destructive">
+              {errors[`products[${index}].productId`]}
+            </p>
+          )}
+        </div>
+
+        {/* ── Quantity ── */}
+        <div className="space-y-1">
+          <Label htmlFor={`o-qty-${index}`} className="text-xs">Qty</Label>
+          <Input
+            id={`o-qty-${index}`}
+            type="number"
+            min={1}
+            value={item.quantity}
+            onChange={(e) => onChangeItem(index, "quantity", e.target.value)}
+            aria-invalid={!!errors[`products[${index}].quantity`]}
+          />
+          {errors[`products[${index}].quantity`] && (
+            <p className="text-xs text-destructive">
+              {errors[`products[${index}].quantity`]}
+            </p>
+          )}
+        </div>
+
+        {/* ── Color selector ── */}
+        <div className="space-y-1">
+          <Label className="text-xs">Color</Label>
+          {availableColors.length > 0 ? (
+            <Select
+              value={item.color}
+              onValueChange={(val) => onChangeItem(index, "color", val)}
+              disabled={!selectedProduct}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select color…" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableColors.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              id={`o-color-${index}`}
+              placeholder={selectedProduct ? "No colors" : "Pick a product first"}
+              value={item.color}
+              disabled={!selectedProduct || availableColors.length === 0}
+              onChange={(e) => onChangeItem(index, "color", e.target.value)}
+              className="disabled:cursor-not-allowed"
+            />
+          )}
+        </div>
+
+        {/* ── Size selector ── */}
+        <div className="space-y-1">
+          <Label className="text-xs">Size</Label>
+          {availableSizes.length > 0 ? (
+            <Select
+              value={item.size}
+              onValueChange={(val) => onChangeItem(index, "size", val)}
+              disabled={!selectedProduct}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select size…" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableSizes.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              id={`o-size-${index}`}
+              placeholder={selectedProduct ? "No sizes" : "Pick a product first"}
+              value={item.size}
+              disabled={!selectedProduct || availableSizes.length === 0}
+              onChange={(e) => onChangeItem(index, "size", e.target.value)}
+              className="disabled:cursor-not-allowed"
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── AddOrderWindow ───────────────────────────────────────────────────────────
 // "New Order" button → Dialog form for placing a customer order.
 // Maps to POST /orders (public — no auth required by the API).
@@ -42,6 +210,22 @@ function AddOrderWindow() {
   const [errors, setErrors] = useState({});
 
   const { mutate, isPending } = useAddOrder();
+
+  // ── remote data ────────────────────────────────────────────────────────────
+  const { data: productsData, isLoading: productsLoading } = useGetProducts();
+  const { data: companiesData, isLoading: companiesLoading } = useGetShippingCompanies();
+  const { data: wilayasData, isLoading: wilayasLoading } = useGetWilayas();
+
+  // Only fetch communes once a valid wilaya code is selected from the list
+  const wilayaReady = WILAYA_RE.test(form.wilayaCode.trim());
+  const { data: communesData, isLoading: communesLoading } = useGetCommunesByWilaya(
+    wilayaReady ? form.wilayaCode.trim() : ""
+  );
+
+  const allProducts = productsData?.data ?? [];
+  const allCompanies = companiesData?.data ?? [];
+  const allWilayas = wilayasData?.data ?? [];
+  const allCommunes = communesData?.data ?? [];
 
   // ── field helpers ──────────────────────────────────────────────────────────
   function set(field, value) {
@@ -83,24 +267,16 @@ function AddOrderWindow() {
       next.phoneNumber = "Must be 10 digits starting with 0 (e.g. 0555123456).";
     }
 
-    if (!form.wilayaCode.trim()) {
-      next.wilayaCode = "Wilaya code is required.";
-    } else if (!WILAYA_RE.test(form.wilayaCode.trim())) {
-      next.wilayaCode = "Must be exactly 2 digits (e.g. 16).";
+    if (!form.wilayaCode) {
+      next.wilayaCode = "Please select a wilaya.";
     }
 
-    const communeId = Number(form.communeId);
     if (!form.communeId) {
-      next.communeId = "Commune ID is required.";
-    } else if (!Number.isInteger(communeId) || communeId <= 0) {
-      next.communeId = "Must be a positive integer.";
+      next.communeId = "Please select a commune.";
     }
 
-    const companyId = Number(form.shippingCompanyId);
     if (!form.shippingCompanyId) {
-      next.shippingCompanyId = "Shipping company ID is required.";
-    } else if (!Number.isInteger(companyId) || companyId <= 0) {
-      next.shippingCompanyId = "Must be a positive integer.";
+      next.shippingCompanyId = "Please select a shipping company.";
     }
 
     if (form.products.length === 0) {
@@ -108,11 +284,8 @@ function AddOrderWindow() {
     }
 
     form.products.forEach((item, i) => {
-      const pid = Number(item.productId);
       if (!item.productId) {
-        next[`products[${i}].productId`] = "Product ID is required.";
-      } else if (!Number.isInteger(pid) || pid <= 0) {
-        next[`products[${i}].productId`] = "Must be a positive integer.";
+        next[`products[${i}].productId`] = "Please select a product.";
       }
 
       const qty = Number(item.quantity);
@@ -222,51 +395,108 @@ function AddOrderWindow() {
                 )}
               </div>
 
-              {/* Wilaya code */}
+              {/* Wilaya selector */}
               <div className="space-y-1.5">
-                <Label htmlFor="o-wilaya">Wilaya Code</Label>
-                <Input
-                  id="o-wilaya"
-                  placeholder="16"
-                  maxLength={2}
+                <Label>Wilaya</Label>
+                <Select
                   value={form.wilayaCode}
-                  onChange={(e) => set("wilayaCode", e.target.value)}
-                  aria-invalid={!!errors.wilayaCode}
-                />
+                  onValueChange={(val) => {
+                    // Reset communeId atomically when wilaya changes
+                    setForm((prev) => ({ ...prev, wilayaCode: val, communeId: "" }));
+                    if (errors.wilayaCode) setErrors((prev) => ({ ...prev, wilayaCode: "" }));
+                    if (errors.communeId) setErrors((prev) => ({ ...prev, communeId: "" }));
+                  }}
+                  disabled={wilayasLoading}
+                >
+                  <SelectTrigger className="w-full" aria-invalid={!!errors.wilayaCode}>
+                    <SelectValue
+                      placeholder={wilayasLoading ? "Loading…" : "Select wilaya…"}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allWilayas.length === 0 ? (
+                      <p className="px-2 py-3 text-xs text-muted-foreground text-center">
+                        No wilayas found
+                      </p>
+                    ) : (
+                      allWilayas.map((w) => (
+                        <SelectItem key={w.code} value={w.code}>
+                          {w.code} — {w.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
                 {errors.wilayaCode && (
                   <p className="text-xs text-destructive">{errors.wilayaCode}</p>
                 )}
               </div>
 
-              {/* Commune ID */}
+              {/* Commune selector */}
               <div className="space-y-1.5">
-                <Label htmlFor="o-commune">Commune ID</Label>
-                <Input
-                  id="o-commune"
-                  type="number"
-                  min={1}
-                  placeholder="3"
-                  value={form.communeId}
-                  onChange={(e) => set("communeId", e.target.value)}
-                  aria-invalid={!!errors.communeId}
-                />
+                <Label>Commune</Label>
+                <Select
+                  value={String(form.communeId)}
+                  onValueChange={(val) => set("communeId", val)}
+                  disabled={!wilayaReady || communesLoading}
+                >
+                  <SelectTrigger className="w-full" aria-invalid={!!errors.communeId}>
+                    <SelectValue
+                      placeholder={
+                        !wilayaReady
+                          ? "Enter wilaya code first…"
+                          : communesLoading
+                          ? "Loading…"
+                          : "Select commune…"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allCommunes.length === 0 ? (
+                      <p className="px-2 py-3 text-xs text-muted-foreground text-center">
+                        No communes found for this wilaya
+                      </p>
+                    ) : (
+                      allCommunes.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
                 {errors.communeId && (
                   <p className="text-xs text-destructive">{errors.communeId}</p>
                 )}
               </div>
 
-              {/* Shipping company ID */}
+              {/* Shipping company selector */}
               <div className="space-y-1.5">
-                <Label htmlFor="o-company">Shipping Company ID</Label>
-                <Input
-                  id="o-company"
-                  type="number"
-                  min={1}
-                  placeholder="1"
-                  value={form.shippingCompanyId}
-                  onChange={(e) => set("shippingCompanyId", e.target.value)}
-                  aria-invalid={!!errors.shippingCompanyId}
-                />
+                <Label>Shipping Company</Label>
+                <Select
+                  value={String(form.shippingCompanyId)}
+                  onValueChange={(val) => set("shippingCompanyId", val)}
+                  disabled={companiesLoading}
+                >
+                  <SelectTrigger className="w-full" aria-invalid={!!errors.shippingCompanyId}>
+                    <SelectValue
+                      placeholder={companiesLoading ? "Loading…" : "Select company…"}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allCompanies.length === 0 ? (
+                      <p className="px-2 py-3 text-xs text-muted-foreground text-center">
+                        No shipping companies found
+                      </p>
+                    ) : (
+                      allCompanies.map((co) => (
+                        <SelectItem key={co.id} value={String(co.id)}>
+                          {co.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
                 {errors.shippingCompanyId && (
                   <p className="text-xs text-destructive">{errors.shippingCompanyId}</p>
                 )}
@@ -298,91 +528,25 @@ function AddOrderWindow() {
                 <p className="text-xs text-destructive">{errors._products}</p>
               )}
 
-              {form.products.map((item, i) => (
-                <div
-                  key={i}
-                  className="rounded-lg border border-border bg-muted/30 p-3 space-y-3"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      Item {i + 1}
-                    </span>
-                    {form.products.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => removeItem(i)}
-                        className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                        aria-label={`Remove item ${i + 1}`}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    {/* Product ID */}
-                    <div className="col-span-2 sm:col-span-1 space-y-1">
-                      <Label htmlFor={`o-pid-${i}`} className="text-xs">Product ID</Label>
-                      <Input
-                        id={`o-pid-${i}`}
-                        type="number"
-                        min={1}
-                        placeholder="10"
-                        value={item.productId}
-                        onChange={(e) => setItem(i, "productId", e.target.value)}
-                        aria-invalid={!!errors[`products[${i}].productId`]}
-                      />
-                      {errors[`products[${i}].productId`] && (
-                        <p className="text-xs text-destructive">
-                          {errors[`products[${i}].productId`]}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Quantity */}
-                    <div className="space-y-1">
-                      <Label htmlFor={`o-qty-${i}`} className="text-xs">Qty</Label>
-                      <Input
-                        id={`o-qty-${i}`}
-                        type="number"
-                        min={1}
-                        value={item.quantity}
-                        onChange={(e) => setItem(i, "quantity", e.target.value)}
-                        aria-invalid={!!errors[`products[${i}].quantity`]}
-                      />
-                      {errors[`products[${i}].quantity`] && (
-                        <p className="text-xs text-destructive">
-                          {errors[`products[${i}].quantity`]}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Color */}
-                    <div className="space-y-1">
-                      <Label htmlFor={`o-color-${i}`} className="text-xs">Color</Label>
-                      <Input
-                        id={`o-color-${i}`}
-                        placeholder="red"
-                        value={item.color}
-                        onChange={(e) => setItem(i, "color", e.target.value)}
-                      />
-                    </div>
-
-                    {/* Size */}
-                    <div className="space-y-1">
-                      <Label htmlFor={`o-size-${i}`} className="text-xs">Size</Label>
-                      <Input
-                        id={`o-size-${i}`}
-                        placeholder="40"
-                        value={item.size}
-                        onChange={(e) => setItem(i, "size", e.target.value)}
-                      />
-                    </div>
-                  </div>
+              {productsLoading ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground py-4">
+                  <Loader2 className="size-4 animate-spin" />
+                  Loading products…
                 </div>
-              ))}
+              ) : (
+                form.products.map((item, i) => (
+                  <ProductItemRow
+                    key={i}
+                    index={i}
+                    item={item}
+                    errors={errors}
+                    allProducts={allProducts}
+                    onChangeItem={setItem}
+                    onRemove={removeItem}
+                    canRemove={form.products.length > 1}
+                  />
+                ))
+              )}
             </div>
 
             {/* ── Footer ────────────────────────────────────────────────── */}
