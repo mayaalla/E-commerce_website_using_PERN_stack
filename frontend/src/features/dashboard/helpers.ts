@@ -47,6 +47,9 @@ export function getDateBounds(range: DateRange, now: Date): { currentStart: Date
 export const isValid = (o: Order): boolean =>
   o.status !== "canceled" && o.status !== "returned";
 
+/** Used exclusively for Net Sales: only count orders that have been shipped. */
+export const isShipped = (o: Order): boolean => o.status === "shipped";
+
 export const isCanceledOrReturned = (o: Order): boolean =>
   o.status === "canceled" || o.status === "returned";
 
@@ -83,7 +86,7 @@ export function formatDZD(amount: number): string {
 // ─── KPI calculations ─────────────────────────────────────────────────────────
 
 export function computeNetSales(orders: Order[]): number {
-  return orders.filter(isValid).reduce((s, o) => s + parseMoney(o.total), 0);
+  return orders.filter(isShipped).reduce((s, o) => s + parseMoney(o.total), 0);
 }
 
 export function computeOrderCount(orders: Order[]): number {
@@ -91,9 +94,9 @@ export function computeOrderCount(orders: Order[]): number {
 }
 
 export function computeAvgOrderValue(orders: Order[]): number {
-  const valid = orders.filter(isValid);
-  if (valid.length === 0) return 0;
-  return computeNetSales(orders) / valid.length;
+  const shipped = orders.filter(isShipped);
+  if (shipped.length === 0) return 0;
+  return computeNetSales(orders) / shipped.length;
 }
 
 export function computeCancelReturnRate(orders: Order[]): number {
