@@ -15,5 +15,8 @@ export function useGetCommunesByWilaya(code: string) {
     queryKey: CommunesByWilayaQueryKey(code),
     queryFn: () => getCommunesBywilaya(code),
     staleTime: 1000 * 60 * 5, // 5 minutes — Communes rarely change
+    // Do NOT fire the request until a valid 2-digit wilaya code is provided.
+    // An empty code would hit GET /communes/by-wilaya/ (no param) → 400.
+    enabled: code.length > 0,
   });
 }
