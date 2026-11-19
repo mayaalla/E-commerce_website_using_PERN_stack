@@ -32,7 +32,9 @@ router.post(
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/coupons
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/", authenticate, authorize("coupon_read"), getAllCoupons);
+router.get("/", authenticate,
+   authorize("coupon_read"), 
+   getAllCoupons);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/coupons/validate/:code
@@ -41,8 +43,8 @@ router.get("/", authenticate, authorize("coupon_read"), getAllCoupons);
 // ─────────────────────────────────────────────────────────────────────────────
 router.get(
   "/validate/:code",
-  authenticate,
-  authorize("coupon_read"),
+  // authenticate,
+  // authorize("coupon_read"),
   validateCouponCode
 );
 
@@ -50,7 +52,11 @@ router.get(
 // GET /api/coupons/:id
 // Validate :id is a positive integer before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/:id", authenticate, authorize("coupon_read"), validateId(), getCouponById);
+router.get("/:id",
+  //  authenticate,
+  //  authorize("coupon_read"), 
+   validateId(), 
+   getCouponById);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PUT /api/coupons/:id
