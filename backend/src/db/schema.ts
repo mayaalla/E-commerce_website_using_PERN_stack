@@ -13,6 +13,7 @@ import {
   unique,
 } from "drizzle-orm/pg-core";
 
+
 export const adminType = pgEnum("admin_type", ["super_admin", "regular_admin"]);
 
 export const adminPermission = pgEnum("admin_permission", [
@@ -190,6 +191,44 @@ export const coupons = pgTable(
       sql`${table.discountPercentage} >= 0 AND ${table.discountPercentage} <= 100`
     ),
   ]
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// product_stock
+// Tracks available stock for every (product, color, size) combination.
+// A row (productId=1, colorHex="#FF0000", size="42", stock=10) means:
+//   product 1 has 10 units left in red, size 42.
+// The triple (productId, colorHex, size) is unique so upserts are safe.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const productStock = pgTable(
+  "product_stock",
+  {
+    id: serial("id").primaryKey(),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id),
+    // Hex colour string stored WITHOUT the leading "#" (6 uppercase hex digits).
+    // e.g. "FF0000" for red. The CHECK constraint enforces the format.
+    colorHex: text("color_hex").notNull(),
+    size: clothingSize("size").notNull(),
+    stock: integer("stock").notNull().default(0),
+  },
+  (table) => [
+    // Each (product, color, size) pair must be unique so we can safely upsert.
+    unique("product_stock_product_color_size_unique").on(
+      table.productId,
+      table.colorHex,
+      table.size,
+    ),
+    // stock must never go negative.
+    check("product_stock_non_negative", sql`${table.stock} >= 0`),
+    // colorHex must be exactly 6 uppercase hex digits (no leading "#").
+    check(
+      "product_stock_color_hex_format",
+      sql`${table.colorHex} ~ '^[0-9A-Fa-f]{6}$'`,
+    ),
+  ],
 );
 
 // Snapshot the purchased items so product edits do not change past orders.
