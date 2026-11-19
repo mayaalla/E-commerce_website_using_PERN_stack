@@ -9,10 +9,27 @@ export type Product = {
   colors: string[];
   sizes: string[];
   categoryId: number;
+  deletedAt: string | null;
+  stock: ProductStock[];
 };
 
 // ─── Clothing sizes enum ──────────────────────────────────────────────────────
 export type ClothingSize = "34" | "36" | "38" | "40" | "42" | "44" | "46" | "48";
+
+// ─── Stock ────────────────────────────────────────────────────────────────────
+export interface StockEntry {
+  colorHex: string; // 6 hex digits without # (e.g. "FF0000")
+  size: ClothingSize;
+  stock: number;
+}
+
+export interface ProductStock {
+  id: number;
+  productId: number;
+  colorHex: string;
+  size: ClothingSize;
+  stock: number;
+}
 
 // ─── Upload tokens ─────────────────────────────────────────────────────────────
 export interface UploadRequestTokens {
@@ -42,6 +59,7 @@ export interface CreateProductRequest {
   promo?: string;
   categoryId: number;
   imageUploads?: string[];
+  stockEntries?: StockEntry[];
 }
 
 export interface CreateProductResponse {
