@@ -239,6 +239,8 @@ export type OrderProduct = {
   quantity: number;
   price: string;
   color?: string;
+  /** Hex code of the chosen color (6 uppercase hex digits, no "#"). Used for stock look-ups. */
+  colorHex?: string;
   size?: string;
 };
 
