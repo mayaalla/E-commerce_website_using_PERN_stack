@@ -47,8 +47,8 @@ router.post(
 // ─────────────────────────────────────────────────────────────────────────────
 router.get(
   "/companies",
-  authenticate,
-  authorize("shipping_company_read"),
+  // authenticate,
+  // authorize("shipping_company_read"),
   getAllShippingCompanies
 );
 
@@ -58,8 +58,8 @@ router.get(
 // ─────────────────────────────────────────────────────────────────────────────
 router.get(
   "/companies/:id",
-  authenticate,
-  authorize("shipping_company_read"),
+  // authenticate,
+  // authorize("shipping_company_read"),
   validateId(),
   getShippingCompanyById
 );
@@ -125,8 +125,7 @@ router.post(
 // ─────────────────────────────────────────────────────────────────────────────
 router.get(
   "/prices/lookup",
-  authenticate,
-  authorize("shipping_read"),
+  // Public checkout needs the delivery price before the customer places an order.
   getShippingPriceByCompanyAndWilaya
 );
 
