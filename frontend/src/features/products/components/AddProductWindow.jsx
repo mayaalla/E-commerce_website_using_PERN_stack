@@ -68,6 +68,9 @@ const isLightHex = (hex) => LIGHT_HEXES.has(hex.toUpperCase());
  * selectedColors: Array of { hex: string, name: string }
  *   hex  — always upper-case, e.g. "#FF0000"
  *   name — human-readable label, e.g. "Red" or a custom name the admin typed
+ *
+ * stockEntries: Array of { size, colorHex, stock }
+ *   Managed dynamically when sizes are toggled.
  */
 const INITIAL_FORM = {
 	title: "",
@@ -77,6 +80,8 @@ const INITIAL_FORM = {
 	categoryId: "",
 	selectedColors: /** @type {{ hex: string; name: string }[]} */ ([]),
 	sizes: /** @type {string[]} */ ([]),
+	/** @type {{ size: string; colorHex: string; stock: string }[]} */
+	stockEntries: [],
 };
 
 // ─── AddProductWindow ──────────────────────────────────────────────────────────
@@ -127,6 +132,18 @@ function AddProductWindow() {
 		setIsUploading(false);
 	}
 
+	/** Update a single stock row identified by size+colorHex */
+	function setStockValue(size, colorHex, value) {
+		setForm((prev) => ({
+			...prev,
+			stockEntries: prev.stockEntries.map((e) =>
+				e.size === size && e.colorHex === colorHex
+					? { ...e, stock: value }
+					: e,
+			),
+		}));
+	}
+
 	function handleOpenChange(next) {
 		setOpen(next);
 		if (!next) resetForm();
@@ -138,29 +155,57 @@ function AddProductWindow() {
 	}
 
 	function toggleSize(size) {
-		setForm((prev) => ({
-			...prev,
-			sizes: prev.sizes.includes(size)
+		setForm((prev) => {
+			const hasSize = prev.sizes.includes(size);
+			const newSizes = hasSize
 				? prev.sizes.filter((s) => s !== size)
-				: [...prev.sizes, size],
-		}));
+				: [...prev.sizes, size];
+
+			// When removing a size, strip its stock entries.
+			// When adding, add one stock row per selected color (or one blank row if no colors yet).
+			let newStock;
+			if (hasSize) {
+				newStock = prev.stockEntries.filter((e) => e.size !== size);
+			} else {
+				const colorRows =
+					prev.selectedColors.length > 0
+						? prev.selectedColors.map((c) => ({
+								size,
+								colorHex: c.hex.replace("#", ""),
+								stock: "",
+							}))
+						: [{ size, colorHex: "", stock: "" }];
+				newStock = [...prev.stockEntries, ...colorRows];
+			}
+			return { ...prev, sizes: newSizes, stockEntries: newStock };
+		});
 	}
 
 	// ── Color helpers ──────────────────────────────────────────────────────────
 	/**
 	 * Toggle a preset color (with its known label).
-	 * If it's already selected → remove it.
-	 * If not → add { hex, name: preset label }.
+	 * If it's already selected → remove it (and strip its stock rows).
+	 * If not → add { hex, name: preset label } (and add stock rows for each selected size).
 	 */
 	function togglePresetColor(hex, label) {
 		const key = hex.toUpperCase();
 		setForm((prev) => {
 			const already = prev.selectedColors.some((c) => c.hex === key);
+			if (already) {
+				return {
+					...prev,
+					selectedColors: prev.selectedColors.filter((c) => c.hex !== key),
+					stockEntries: prev.stockEntries.filter(
+						(e) => e.colorHex !== key.replace("#", ""),
+					),
+				};
+			}
+			const colorHex = key.replace("#", "");
+			const newRows = prev.sizes.map((size) => ({ size, colorHex, stock: "" }));
 			return {
 				...prev,
-				selectedColors: already
-					? prev.selectedColors.filter((c) => c.hex !== key)
-					: [...prev.selectedColors, { hex: key, name: label }],
+				selectedColors: [...prev.selectedColors, { hex: key, name: label }],
+				stockEntries: [...prev.stockEntries, ...newRows],
 			};
 		});
 	}
@@ -174,9 +219,12 @@ function AddProductWindow() {
 		const name = pickerName.trim() || key;
 		setForm((prev) => {
 			if (prev.selectedColors.some((c) => c.hex === key)) return prev;
+			const colorHex = key.replace("#", "");
+			const newRows = prev.sizes.map((size) => ({ size, colorHex, stock: "" }));
 			return {
 				...prev,
 				selectedColors: [...prev.selectedColors, { hex: key, name }],
+				stockEntries: [...prev.stockEntries, ...newRows],
 			};
 		});
 		setPickerName("");
@@ -185,9 +233,11 @@ function AddProductWindow() {
 	/** Remove a color by its hex key */
 	function removeColor(hex) {
 		const key = hex.toUpperCase();
+		const colorHex = key.replace("#", "");
 		setForm((prev) => ({
 			...prev,
 			selectedColors: prev.selectedColors.filter((c) => c.hex !== key),
+			stockEntries: prev.stockEntries.filter((e) => e.colorHex !== colorHex),
 		}));
 	}
 
@@ -360,6 +410,15 @@ function AddProductWindow() {
 			// Send color names (or hex as fallback) to the backend
 			const colors = form.selectedColors.map((c) => c.name || c.hex);
 
+			// Build stockEntries — only include rows that have both colorHex and stock set
+			const stockEntries = form.stockEntries
+				.filter((e) => e.colorHex && e.stock !== "")
+				.map((e) => ({
+					colorHex: e.colorHex.replace("#", "").toUpperCase(),
+					size: e.size,
+					stock: parseInt(e.stock, 10),
+				}));
+
 			const payload = {
 				title: form.title.trim(),
 				description: form.description.trim(),
@@ -369,6 +428,7 @@ function AddProductWindow() {
 				categoryId: parseInt(form.categoryId, 10),
 				...(form.promo !== "" ? { promo: form.promo.trim() } : {}),
 				...(imageUploads.length > 0 ? { imageUploads } : {}),
+				...(stockEntries.length > 0 ? { stockEntries } : {}),
 			};
 
 			mutate(payload, {
@@ -945,6 +1005,115 @@ function AddProductWindow() {
 							})}
 						</div>
 					</div>
+
+
+					{/* ── Stock per size ───────────────────────────────────────────── */}
+					{form.sizes.length > 0 && (
+						<div className="flex flex-col gap-3">
+							<div className="flex items-center justify-between">
+								<Label>
+									Stock{" "}
+									<span className="text-xs font-normal text-muted-foreground">
+										(per size &amp; color)
+									</span>
+								</Label>
+							</div>
+
+							<div className="rounded-lg border border-input bg-muted/20 overflow-hidden">
+								{/* Table header */}
+								<div className="grid grid-cols-[64px_1fr_100px] border-b border-input bg-muted/40 px-3 py-2">
+									<span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
+										Size
+									</span>
+									<span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
+										Color
+									</span>
+									<span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest text-right">
+										Stock
+									</span>
+								</div>
+
+								{/* Rows grouped by size */}
+								<div className="divide-y divide-border/60">
+									{form.sizes.map((size) => {
+										const sizeRows = form.stockEntries.filter((e) => e.size === size);
+										const displayRows =
+											sizeRows.length > 0
+												? sizeRows
+												: [{ size, colorHex: "", stock: "" }];
+
+										return displayRows.map((entry, rowIdx) => {
+											const isFirst = rowIdx === 0;
+											const colorObj = form.selectedColors.find(
+												(c) =>
+													c.hex.replace("#", "").toUpperCase() ===
+													entry.colorHex.toUpperCase(),
+											);
+											const isLightColor = colorObj ? isLightHex(colorObj.hex) : false;
+
+											return (
+												<div
+													key={`${size}-${entry.colorHex || rowIdx}`}
+													className="grid grid-cols-[64px_1fr_100px] items-center px-3 py-2.5"
+												>
+													{/* Size badge — first row only */}
+													<div className="flex items-center">
+														{isFirst ? (
+															<span className="inline-flex items-center justify-center w-10 h-8 rounded-md border border-primary bg-primary/10 text-primary text-sm font-semibold select-none">
+																{size}
+															</span>
+														) : (
+															<span className="w-10" aria-hidden="true" />
+														)}
+													</div>
+
+													{/* Color display */}
+													<div className="flex items-center gap-2 pr-3">
+														{entry.colorHex ? (
+															<div className="flex items-center gap-2">
+																<span
+																	className={[
+																		"shrink-0 inline-flex size-5 rounded-full border",
+																		isLightColor ? "border-border" : "border-transparent",
+																	].join(" ")}
+																	style={{ backgroundColor: `#${entry.colorHex}` }}
+																	aria-hidden="true"
+																/>
+																<span className="text-sm text-foreground">
+																	{colorObj?.name ?? `#${entry.colorHex}`}
+																</span>
+															</div>
+														) : (
+															<span className="text-xs text-muted-foreground italic">
+																No colors selected
+															</span>
+														)}
+													</div>
+
+													{/* Stock input */}
+													<div className="flex justify-end">
+														<Input
+															type="number"
+															min="0"
+															step="1"
+															placeholder="0"
+															value={entry.stock}
+															disabled={isBusy}
+															aria-label={`Stock for size ${size}${entry.colorHex ? ` color #${entry.colorHex}` : ""}`}
+															onChange={(e) =>
+																setStockValue(size, entry.colorHex, e.target.value)
+															}
+															className="h-8 w-24 text-right text-sm"
+														/>
+													</div>
+												</div>
+											);
+										});
+									})}
+								</div>
+							</div>
+						</div>
+					)}
 
 					{/* ── Form-level error ───────────────────────────────────────── */}
 					{errors.form && (
