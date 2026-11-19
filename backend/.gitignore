@@ -8,3 +8,5 @@ coverage/
 drizzle/
 upload.md
 Authorization-explication.md
+.old/
+Pagination.md
