@@ -33,7 +33,10 @@ router.post(
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/communes
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/", authenticate, authorize("commune_read"), getAllCommunes);
+router.get("/", 
+  // authenticate, 
+  // authorize("commune_read"),
+   getAllCommunes);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/communes/by-wilaya/:code
@@ -42,8 +45,8 @@ router.get("/", authenticate, authorize("commune_read"), getAllCommunes);
 // ─────────────────────────────────────────────────────────────────────────────
 router.get(
   "/by-wilaya/:code",
-  authenticate,
-  authorize("commune_read"),
+  // authenticate,
+  // authorize("commune_read"),
   validateWilayaCode("code"),
   getCommunesByWilaya
 );
