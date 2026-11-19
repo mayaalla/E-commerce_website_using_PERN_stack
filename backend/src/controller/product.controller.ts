@@ -32,6 +32,12 @@ const isUploadVerificationFailure = (err: unknown): boolean =>
     /token not found/i.test(err.message) ||
     /too many images/i.test(err.message));
 
+const isStockConstraintViolation = (err: unknown): boolean =>
+  err instanceof Error &&
+  (/non.negative/i.test(err.message) ||
+    /stock/i.test(err.message) && /negative/i.test(err.message) ||
+    /color_hex/i.test(err.message));
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/products
 // Body already validated by validateCreateProduct middleware.
