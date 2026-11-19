@@ -31,7 +31,10 @@ router.post(
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/wilayas
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/", authenticate, authorize("wilaya_read"), getAllWilayas);
+router.get("/", 
+  // authenticate, 
+  // authorize("wilaya_read"), 
+  getAllWilayas);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/wilayas/:code
@@ -39,9 +42,9 @@ router.get("/", authenticate, authorize("wilaya_read"), getAllWilayas);
 // ─────────────────────────────────────────────────────────────────────────────
 router.get(
   "/:code",
-  authenticate,
-  authorize("wilaya_read"),
-  validateWilayaCode(),
+  // authenticate,
+  // authorize("wilaya_read"),
+  // validateWilayaCode(),
   getWilayaByCode
 );
 
