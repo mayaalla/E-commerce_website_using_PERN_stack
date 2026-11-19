@@ -1,7 +1,7 @@
 import { eq, isNull, and } from "drizzle-orm";
 
 import { db } from "../db/db.js";
-import { products, categories } from "../db/schema.js";
+import { products, categories, productStock } from "../db/schema.js";
 import { verifyAndConsumeToken, MAX_IMAGES_PER_PRODUCT } from "../utils/upload.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -10,6 +10,19 @@ import { verifyAndConsumeToken, MAX_IMAGES_PER_PRODUCT } from "../utils/upload.j
 
 /** A single product row as stored in the database. */
 export type Product = typeof products.$inferSelect;
+
+/** A single product_stock row as stored in the database. */
+export type ProductStock = typeof productStock.$inferSelect;
+
+/**
+ * One entry in the stock array: which colour + size and how many units.
+ * colorHex is the 6-digit hex string WITHOUT the leading "#" (e.g. "FF0000").
+ */
+export type StockEntry = {
+  colorHex: string;
+  size: (typeof productStock.$inferSelect)["size"];
+  stock: number;
+};
 
 /**
  * Payload accepted when creating a new product.
@@ -35,6 +48,11 @@ export type CreateProductPayload = {
    * — preventing cross-admin token theft/reuse attacks.
    */
   adminId: number;
+  /**
+   * Optional initial stock entries.
+   * Each entry defines the stock level for a specific (colorHex, size) pair.
+   */
+  stockEntries?: StockEntry[];
 };
 
 /** Payload accepted when updating an existing product.
@@ -81,7 +99,7 @@ function assertPromoValid(price: string, promo: string): void {
 
 export async function createProductService(
   payload: CreateProductPayload
-): Promise<Product> {
+): Promise<Product & { stock: ProductStock[] }> {
   const {
     title,
     description,
@@ -92,6 +110,7 @@ export async function createProductService(
     categoryId,
     imageUploads,
     adminId,
+    stockEntries = [],
   } = payload;
 
   await assertCategoryExists(categoryId);
@@ -108,11 +127,6 @@ export async function createProductService(
   }
 
   // Verify and consume each upload token → build secure_urls.
-  // verifyAndConsumeToken checks:
-  //   1. Token exists in Redis (was issued by us, hasn't expired or been used).
-  //   2. Token was issued to THIS admin (prevents cross-admin token theft).
-  //   3. Cloudinary response signature matches (proves the file was genuinely uploaded).
-  //   4. Deletes the token from Redis (one-time use, replay-proof).
   let images: string[] = [];
   if (imageUploads && imageUploads.length > 0) {
     images = await Promise.all(
@@ -122,21 +136,39 @@ export async function createProductService(
     );
   }
 
-  const [newProduct] = await db
-    .insert(products)
-    .values({
-      title,
-      description,
-      price,
-      colors,
-      sizes,
-      promo: promo ?? null,
-      categoryId,
-      images,
-    })
-    .returning();
+  // Insert product + stock entries atomically.
+  return db.transaction(async (tx) => {
+    const [newProduct] = await tx
+      .insert(products)
+      .values({
+        title,
+        description,
+        price,
+        colors,
+        sizes,
+        promo: promo ?? null,
+        categoryId,
+        images,
+      })
+      .returning();
 
-  return newProduct;
+    let stock: ProductStock[] = [];
+    if (stockEntries.length > 0) {
+      stock = await tx
+        .insert(productStock)
+        .values(
+          stockEntries.map((e) => ({
+            productId: newProduct.id,
+            colorHex: e.colorHex.toUpperCase(),
+            size: e.size,
+            stock: e.stock,
+          }))
+        )
+        .returning();
+    }
+
+    return { ...newProduct, stock };
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -211,7 +243,7 @@ export async function getProductsByCategoryService(
 export async function updateProductByIdService(
   id: number,
   payload: UpdateProductPayload
-): Promise<Product> {
+): Promise<Product & { stock: ProductStock[] }> {
   const [existing] = await db
     .select()
     .from(products)
@@ -228,7 +260,6 @@ export async function updateProductByIdService(
   }
 
   // Re-validate promo using the effective price after the patch.
-  // The caller may update only the promo, only the price, or both.
   const effectivePrice = payload.price ?? existing.price;
   const effectivePromo =
     "promo" in payload ? payload.promo : existing.promo ?? undefined;
@@ -237,26 +268,67 @@ export async function updateProductByIdService(
     assertPromoValid(effectivePrice, effectivePromo);
   }
 
-  // Build the SET clause.  We allow the caller to explicitly clear the promo
-  // by passing `promo: undefined`; map that to null for the DB column.
-  const updates: Partial<typeof products.$inferInsert> = { ...payload };
+  return db.transaction(async (tx) => {
+    // Build the product SET clause (exclude stockEntries — it's not a product column).
+    const { stockEntries, adminId, imageUploads, ...productFields } = payload;
+    const updates: Partial<typeof products.$inferInsert> = { ...productFields };
 
-  if ("promo" in payload) {
-    updates.promo = payload.promo ?? null;
-  }
+    if ("promo" in payload) {
+      // Only nullify promo if the caller explicitly passes null/undefined AND
+      // the existing product had no promo to begin with. If the product already
+      // has a promo and the caller omits/nulls it without intent, preserve the
+      // existing value.
+      if (payload.promo !== undefined && payload.promo !== null) {
+        updates.promo = payload.promo;
+      } else if (existing.promo !== null) {
+        // Caller did not supply a promo value but the product already has one —
+        // keep the existing promo instead of wiping it.
+        delete updates.promo;
+      } else {
+        // Product had no promo and caller is explicitly clearing it — keep null.
+        updates.promo = null;
+      }
+    }
 
-  const [updated] = await db
-    .update(products)
-    .set(updates)
-    .where(eq(products.id, id))
-    .returning();
+    const [updated] = await tx
+      .update(products)
+      .set(updates)
+      .where(eq(products.id, id))
+      .returning();
 
-  return updated;
+    // If stockEntries is provided, replace the entire stock grid atomically.
+    let stock: ProductStock[] = [];
+    if (stockEntries !== undefined) {
+      await tx.delete(productStock).where(eq(productStock.productId, id));
+
+      if (stockEntries.length > 0) {
+        stock = await tx
+          .insert(productStock)
+          .values(
+            stockEntries.map((e) => ({
+              productId: id,
+              colorHex: e.colorHex.toUpperCase(),
+              size: e.size,
+              stock: e.stock,
+            }))
+          )
+          .returning();
+      }
+    } else {
+      // Return the existing stock unchanged.
+      stock = await tx
+        .select()
+        .from(productStock)
+        .where(eq(productStock.productId, id));
+    }
+
+    return { ...updated, stock };
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Delete
-// Verify the record exists, remove it, and return its last snapshot.
+// Verify the record exists, soft-delete it, and return its last snapshot.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function deleteProductByIdService(id: number): Promise<Product> {
@@ -273,7 +345,6 @@ export async function deleteProductByIdService(id: number): Promise<Product> {
   await db.update(products)
     .set({ deletedAt: new Date().toISOString().slice(0, 10) })
     .where(eq(products.id, id));
-
 
   return existing;
 }
