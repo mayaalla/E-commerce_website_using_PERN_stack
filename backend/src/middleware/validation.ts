@@ -30,6 +30,16 @@ const moneySchema = z
 // Clothing sizes that exist in the database enum.
 const clothingSizes = ["34", "36", "38", "40", "42", "44", "46", "48"] as const;
 
+// A valid 6-digit hex colour WITHOUT the leading "#" (case-insensitive input;
+// the service normalises to uppercase before persisting).
+const colorHexSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^[0-9A-Fa-f]{6}$/,
+    "colorHex must be exactly 6 hex digits without the '#' prefix (e.g. 'FF0000')"
+  );
+
 // Admin permission values that exist in the database enum.
 const adminPermissions = [
   "product_management",
@@ -246,11 +256,29 @@ const createProductSchema = z.object({
     .min(0)
     .max(8, "At most 8 images are allowed per product")
     .optional(),
+
+  // Stock entries: each defines the available units for a (colorHex, size) pair.
+  // colorHex is 6 hex digits without "#" (e.g. "FF0000").
+  stockEntries: z
+    .array(
+      z.object({
+        colorHex: colorHexSchema,
+        size: z.enum(clothingSizes, {
+          error: `Size must be one of: ${clothingSizes.join(", ")}`,
+        }),
+        stock: z
+          .number()
+          .int("Stock must be a whole number")
+          .min(0, "Stock must be a non-negative number"),
+      })
+    )
+    .optional(),
 });
 
 // Schema for updating a product.
 // All fields are optional (patch semantics).
 // `promo` can additionally be null to explicitly clear an existing promo price.
+// When `stockEntries` is provided, it replaces the entire stock grid atomically.
 const updateProductSchema = createProductSchema.partial().extend({
   promo: z.union([moneySchema, z.null()]).optional(),
 });

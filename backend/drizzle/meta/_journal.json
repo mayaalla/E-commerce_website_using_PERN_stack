@@ -50,6 +50,13 @@
       "when": 1794632837878,
       "tag": "0006_add_wilaya_commune_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795090677580,
+      "tag": "0007_worried_nitro",
+      "breakpoints": true
     }
   ]
 }
