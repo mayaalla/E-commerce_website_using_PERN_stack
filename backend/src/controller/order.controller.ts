@@ -51,6 +51,9 @@ const isCouponUnavailable = (err: unknown) =>
 const isTerminalOrderStatus = (err: unknown) =>
   errorCode(err) === "TERMINAL_ORDER_STATUS";
 
+const isInsufficientStock = (err: unknown) =>
+  errorCode(err) === "INSUFFICIENT_STOCK";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/orders
 // Body already validated by validateCreateOrder middleware.
@@ -86,6 +89,9 @@ export async function createOrder(
     }
     if (isCouponNotFound(error) || isCouponUnavailable(error)) {
       return next(createHttpError(400, (error as Error).message));
+    }
+    if (isInsufficientStock(error)) {
+      return next(createHttpError(409, (error as Error).message));
     }
     next(error);
   }
