@@ -4,6 +4,7 @@ import { db } from "../db/db.js";
 import {
   orders,
   products,
+  productStock,
   wilayas,
   communes,
   shippingCompanies,
@@ -16,6 +17,9 @@ import { validateCouponCodeService } from "./coupon.service.js";
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Drizzle transaction object – inferred from db.transaction callback signature. */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /** A single order row as stored in the database. */
 export type Order = typeof orders.$inferSelect;
 
@@ -23,8 +27,14 @@ export type Order = typeof orders.$inferSelect;
 export type OrderItemInput = {
   productId: number;
   quantity: number;
-  /** Optional color variant chosen by the customer. */
+  /** Display color name chosen by the customer (e.g. "Skin", "Red"). Stored in the order snapshot. */
   color?: string;
+  /**
+   * Hex code of the chosen color (6 uppercase hex digits, no "#").
+   * Used to look up the matching product_stock row.
+   * Must be provided alongside `color` when stock tracking is needed.
+   */
+  colorHex?: string;
   /** Optional size variant chosen by the customer. */
   size?: string;
 };
@@ -177,6 +187,97 @@ async function fetchShippingCost(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Stock helpers
+// Both run inside the caller's transaction so they share the same DB snapshot.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Decrement stock for each order item that has both a color and a size.
+ * Throws INSUFFICIENT_STOCK when any matching row would go negative.
+ * Items without color+size are skipped (no stock row tracks them).
+ */
+async function decrementStock(
+  items: OrderItemInput[],
+  tx: Tx
+): Promise<void> {
+  for (const item of items) {
+    if (!item.colorHex || !item.size) continue;
+
+    const colorHex = item.colorHex.toUpperCase();
+
+    // Lock the row and check available stock before decrementing.
+    const [row] = await tx
+      .select({ id: productStock.id, stock: productStock.stock })
+      .from(productStock)
+      .where(
+        and(
+          eq(productStock.productId, item.productId),
+          eq(productStock.colorHex, colorHex),
+          eq(productStock.size, item.size as typeof productStock.size._.data)
+        )
+      )
+      .limit(1);
+
+    if (!row) {
+      throw serviceError(
+        `No stock entry found for product ${item.productId} ` +
+          `(colorHex: ${item.colorHex}, size: ${item.size})`,
+        "INSUFFICIENT_STOCK"
+      );
+    }
+
+    if (row.stock < item.quantity) {
+      throw serviceError(
+        `Insufficient stock for product ${item.productId} ` +
+          `(colorHex: ${item.colorHex}, size: ${item.size}): ` +
+          `requested ${item.quantity}, available ${row.stock}`,
+        "INSUFFICIENT_STOCK"
+      );
+    }
+
+    await tx
+      .update(productStock)
+      .set({ stock: row.stock - item.quantity })
+      .where(eq(productStock.id, row.id));
+  }
+}
+
+/**
+ * Restore (increment) stock for every item in the order snapshot that has
+ * both a color and a size.  Called when an order is canceled or returned.
+ */
+async function restoreStock(
+  orderProducts: OrderProduct[],
+  tx: Tx
+): Promise<void> {
+  for (const item of orderProducts) {
+    if (!item.colorHex || !item.size) continue;
+
+    const colorHex = item.colorHex.toUpperCase();
+
+    const [row] = await tx
+      .select({ id: productStock.id, stock: productStock.stock })
+      .from(productStock)
+      .where(
+        and(
+          eq(productStock.productId, item.productId),
+          eq(productStock.colorHex, colorHex),
+          eq(productStock.size, item.size as typeof productStock.size._.data)
+        )
+      )
+      .limit(1);
+
+    // If the stock row was deleted (e.g. product removed) we silently skip.
+    if (!row) continue;
+
+    await tx
+      .update(productStock)
+      .set({ stock: row.stock + item.quantity })
+      .where(eq(productStock.id, row.id));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Create order
 //
 // All DB work runs inside a single serializable-level transaction:
@@ -186,7 +287,8 @@ async function fetchShippingCost(
 //   4. Guard: every requested product must exist.
 //   5. Optionally validate the coupon code (fails fast on invalid code).
 //   6. Build the product snapshot array and compute the server-side total.
-//   7. Insert the order row and return the new record.
+//   7. Decrement stock for items that have color + size.
+//   8. Insert the order row and return the new record.
 //
 // Computing the total on the server prevents price-manipulation attacks where
 // the client sends a lower total than the real charge.
@@ -279,6 +381,7 @@ export async function createOrderService(
       };
 
       if (item.color) snapshot.color = item.color;
+      if (item.colorHex) snapshot.colorHex = item.colorHex.toUpperCase();
       if (item.size) snapshot.size = item.size;
 
       return snapshot;
@@ -290,7 +393,12 @@ export async function createOrderService(
     const discountAmount = productSubtotal - discountedSubtotal;
     const total = (discountedSubtotal + shippingCost).toFixed(2);
 
-    // ── Step 7: Persist the order ───────────────────────────────────────────
+    // ── Step 7: Decrement stock ─────────────────────────────────────────────
+    // Must run before the INSERT so a failed stock check rolls back the whole
+    // transaction and no order row is created.
+    await decrementStock(items, tx);
+
+    // ── Step 8: Persist the order ───────────────────────────────────────────
     const [newOrder] = await tx
       .insert(orders)
       .values({
@@ -367,34 +475,44 @@ export async function updateOrderStatusService(
   id: number,
   payload: UpdateOrderStatusPayload
 ): Promise<Order> {
-  // Read current state before updating so we can enforce transition rules.
-  const [existing] = await db
-    .select({ id: orders.id, status: orders.status })
-    .from(orders)
-    .where(and(isNull(orders.deletedAt), eq(orders.id, id)))
-    .limit(1);
+  return db.transaction(async (tx) => {
+    // Read current state before updating so we can enforce transition rules.
+    const [existing] = await tx
+      .select()
+      .from(orders)
+      .where(and(isNull(orders.deletedAt), eq(orders.id, id)))
+      .limit(1);
 
-  if (!existing ) {
-    throw serviceError(`Order with id ${id} not found`, "NOT_FOUND");
-  }
+    if (!existing) {
+      throw serviceError(`Order with id ${id} not found`, "NOT_FOUND");
+    }
 
-  // Terminal-state guard: canceled / returned orders are immutable.
-  const terminalStatuses: Order["status"][] = ["canceled", "returned"];
-  if (terminalStatuses.includes(existing.status)) {
-    throw serviceError(
-      `Order ${id} has reached terminal status "${existing.status}" ` +
-        `and cannot be updated`,
-      "TERMINAL_ORDER_STATUS"
-    );
-  }
+    // Terminal-state guard: canceled / returned orders are immutable.
+    const terminalStatuses: Order["status"][] = ["canceled", "returned"];
+    if (terminalStatuses.includes(existing.status)) {
+      throw serviceError(
+        `Order ${id} has reached terminal status "${existing.status}" ` +
+          `and cannot be updated`,
+        "TERMINAL_ORDER_STATUS"
+      );
+    }
 
-  const [updated] = await db
-    .update(orders)
-    .set({ status: payload.status })
-    .where(eq(orders.id, id))
-    .returning();
+    // Restore stock when the order moves to a terminal status.
+    // We only restore if the previous status was one that consumed stock
+    // (i.e. not already a stock-restoring state).
+    const stockRestoringStatuses: Order["status"][] = ["canceled", "returned"];
+    if (stockRestoringStatuses.includes(payload.status)) {
+      await restoreStock(existing.products as OrderProduct[], tx);
+    }
 
-  return updated;
+    const [updated] = await tx
+      .update(orders)
+      .set({ status: payload.status })
+      .where(eq(orders.id, id))
+      .returning();
+
+    return updated;
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
