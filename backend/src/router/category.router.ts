@@ -27,19 +27,20 @@ router.post(
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/categories
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/", authenticate, authorize("category_read"), getAllCategories);
-
+// router.get("/", authenticate, authorize("category_read"), getAllCategories);
+router.get("/", getAllCategories);
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/categories/:id
 // Validate :id is a positive integer before reaching the controller.
 // ─────────────────────────────────────────────────────────────────────────────
-router.get(
-  "/:id",
-  authenticate,
-  authorize("category_read"),
-  validateId(),
-  getCategoryById
-);
+// router.get(
+//   "/:id",
+//   authenticate,
+//   authorize("category_read"),
+//   validateId(),
+//   getCategoryById
+// );
+router.get("/:id", validateId(), getCategoryById);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PUT /api/categories/:id
