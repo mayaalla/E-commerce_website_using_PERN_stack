@@ -53,7 +53,7 @@
 | Enum | Values |
 |---|---|
 | `adminType` | `super_admin`, `regular_admin` |
-| `adminPermission` | `product_read`, `product_add`, `product_update`, `product_delete`, `category_read`, `category_add`, `category_update`, `category_delete`, `order_read`, `order_add`, `order_update`, `order_delete`, `coupon_read`, `coupon_add`, `coupon_update`, `coupon_delete`, `shipping_read`, `shipping_add`, `shipping_update`, `shipping_delete`, `shipping_company_read`, `shipping_company_add`, `shipping_company_update`, `shipping_company_delete`, `full_access` |
+| `adminPermission` | `product_read`, `product_add`, `product_update`, `product_delete`, `category_read`, `category_add`, `category_update`, `category_delete`, `commune_read`, `commune_add`, `commune_update`, `commune_delete`, `order_read`, `order_add`, `order_update`, `order_delete`, `coupon_read`, `coupon_add`, `coupon_update`, `coupon_delete`, `shipping_read`, `shipping_add`, `shipping_update`, `shipping_delete`, `shipping_company_read`, `shipping_company_add`, `shipping_company_update`, `shipping_company_delete`, `wilaya_read`, `wilaya_add`, `wilaya_update`, `wilaya_delete`, `full_access` |
 | `clothingSize` | `34`, `36`, `38`, `40`, `42`, `44`, `46`, `48` |
 | `orderStatus` | `confirmed`, `pending`, `canceled`, `returned`, `shipped` |
 | `couponStatus` | `active`, `inactive`, `expired` |
@@ -128,6 +128,10 @@ router.post("/products", authenticate, authorize("product_add"), createProductHa
 | `category_add` | Create categories |
 | `category_update` | Update categories |
 | `category_delete` | Delete categories |
+| `commune_read` | Read/list communes |
+| `commune_add` | Create communes |
+| `commune_update` | Update communes |
+| `commune_delete` | Delete communes |
 | `order_read` | Read/list orders & stats |
 | `order_add` | Create orders |
 | `order_update` | Update order status |
@@ -144,6 +148,10 @@ router.post("/products", authenticate, authorize("product_add"), createProductHa
 | `shipping_company_add` | Create shipping companies |
 | `shipping_company_update` | Update shipping companies |
 | `shipping_company_delete` | Soft-delete shipping companies |
+| `wilaya_read` | Read/list wilayas |
+| `wilaya_add` | Create wilayas |
+| `wilaya_update` | Update wilayas |
+| `wilaya_delete` | Delete wilayas |
 | `full_access` | Everything (equivalent to `super_admin`) |
 
 ---
@@ -494,11 +502,12 @@ Returns only **active** (non-deleted) categories.
 ## Products
 
 > **UPDATED** — All endpoints now use **soft-delete**. Deleted products have a `deletedAt` date string set; `null` means active. Soft-deleted products are hidden from all list/read endpoints, cannot be ordered, and cannot be updated or re-deleted. Products cannot be created under a soft-deleted category.
+>
+> **NEW** — Products now support per-(colorHex, size) **stock tracking** via the `product_stock` table. Create and update endpoints accept `stockEntries`; create/update responses include a `stock` array. Read/list endpoints return product fields only (stock is not embedded). All read/list/by-category product endpoints now require authentication (`product_read` permission).
 
 ### POST `/products/upload/request-tokens`
 
 > 🔒 Requires: `authenticate` + `authorize("product_add")` + upload rate limit (10 req / 15 min)
-
 Request signed Cloudinary upload tokens before uploading images.
 
 **Request Body**
@@ -560,11 +569,19 @@ Create a new product. Images must be uploaded via Cloudinary first using the tok
       "version": 1699876543,
       "signature": "sha1hash"
     }
+  ],
+  "stockEntries": [
+    {
+      "colorHex": "FF0000",
+      "size": "40",
+      "stock": 10
+    }
   ]
 }
 ```
 
 > `colors` and `sizes` default to `[]`. `imageUploads` is optional (max 8 entries).  
+> `stockEntries` is optional. Each entry defines stock for a specific `(colorHex, size)` pair. `colorHex` is 6 uppercase hex digits **without** the `#` prefix (e.g. `"FF0000"`). `size` must be a valid `clothingSize` enum value. `stock` must be a non-negative integer.  
 > **UPDATED:** `categoryId` must reference an **active** (non-soft-deleted) category.
 
 **Response `201`**
@@ -582,10 +599,15 @@ Create a new product. Images must be uploaded via Cloudinary first using the tok
     "colors": ["red"],
     "sizes": ["38", "40"],
     "categoryId": 1,
-    "deletedAt": null
+    "deletedAt": null,
+    "stock": [
+      { "id": 1, "productId": 10, "colorHex": "FF0000", "size": "40", "stock": 10 }
+    ]
   }
 }
 ```
+
+> `stock` is an array of `product_stock` rows. It is empty (`[]`) when no `stockEntries` were provided.
 
 **Errors**
 
@@ -594,20 +616,27 @@ Create a new product. Images must be uploaded via Cloudinary first using the tok
 | `400` | Validation error |
 | `404` | Category not found or deleted |
 | `422` | Promo price exceeds regular price |
+| `422` | Upload token verification failed / token not found |
+| `422` | Too many images (max 8) |
+| `422` | Stock value is negative or `colorHex` format is invalid |
 
 ---
 
 ### GET `/products`
 
-List all **active** (non-deleted) products (public).
+> 🔒 Requires: `authenticate` + `authorize("product_read")`
 
-**Response `200`** — array of product objects (all with `deletedAt: null`).
+List all **active** (non-deleted) products.
+
+**Response `200`** — array of product objects (all with `deletedAt: null`). Stock is **not** embedded in list responses.
 
 ---
 
 ### GET `/products/by-category/:categoryId` ✦ UPDATED
 
-Get all **active** products in a given **active** category (public).
+> 🔒 Requires: `authenticate` + `authorize("product_read")`
+
+Get all **active** products in a given **active** category.
 
 **Params:** `categoryId` — positive integer
 
@@ -621,7 +650,9 @@ Get all **active** products in a given **active** category (public).
 
 ### GET `/products/:id`
 
-Get a single **active** product (public).
+> 🔒 Requires: `authenticate` + `authorize("product_read")`
+
+Get a single **active** product.
 
 **Response `200`** — single product object. **`404`** if not found **or soft-deleted**.
 
@@ -633,9 +664,25 @@ Get a single **active** product (public).
 
 Partially update a product (all fields optional).
 
-**Request Body** — same as `POST /products`, all fields optional.
+**Request Body** — same as `POST /products`, all fields optional. `promo` can additionally be set to `null` to explicitly clear an existing promo price. When `stockEntries` is provided, it **replaces the entire stock grid atomically** (delete-all then re-insert).
 
-**Response `200`** — updated product.
+**Response `200`**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 10,
+    "title": "Red T-Shirt",
+    "...",
+    "stock": [
+      { "id": 1, "productId": 10, "colorHex": "FF0000", "size": "40", "stock": 10 }
+    ]
+  }
+}
+```
+
+> `stock` reflects the current stock grid after the update. If `stockEntries` was not sent, the existing stock rows are returned unchanged.
 
 **Errors:** `404` (not found or soft-deleted), `422` (invalid promo).
 
@@ -662,6 +709,33 @@ Partially update a product (all fields optional).
 ```
 
 **Errors:** `404` if not found or already soft-deleted.
+
+---
+
+### Product Stock Schema
+
+The `product_stock` table tracks available units for every `(product, colorHex, size)` combination. It is managed via the `stockEntries` field on `POST /products` and `PUT /products/:id`.
+
+**`StockEntry` object (used in `stockEntries` arrays):**
+
+| Field | Type | Description |
+|---|---|---|
+| `colorHex` | `string` | 6 hex digits **without** `#` (e.g. `"FF0000"`). Case-insensitive input; stored as uppercase. |
+| `size` | `clothingSize` | One of `"34"`, `"36"`, `"38"`, `"40"`, `"42"`, `"44"`, `"46"`, `"48"`. |
+| `stock` | `integer ≥ 0` | Number of units available. |
+
+**`ProductStock` row (returned in `stock` arrays of create/update responses):**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `number` | Auto-generated primary key. |
+| `productId` | `number` | FK to the parent product. |
+| `colorHex` | `string` | 6 uppercase hex digits without `#`. |
+| `size` | `clothingSize` | Clothing size enum value. |
+| `stock` | `number` | Available units (always ≥ 0). |
+
+> **Uniqueness:** The `(productId, colorHex, size)` triple is unique. Sending duplicate entries in `stockEntries` will cause a DB-level constraint error.  
+> **Replace semantics on update:** When `stockEntries` is provided in `PUT /products/:id`, the entire existing stock grid is deleted and replaced atomically. Omit `stockEntries` to leave the current stock untouched.
 
 ---
 
@@ -1261,6 +1335,33 @@ Update an order's status. Orders in a terminal state (`canceled`, `returned`) ca
 ```
 
 **Errors:** `404` if not found or already soft-deleted.
+
+---
+
+### Product Stock Schema
+
+The `product_stock` table tracks available units for every `(product, colorHex, size)` combination. It is managed via the `stockEntries` field on `POST /products` and `PUT /products/:id`.
+
+**`StockEntry` object (used in `stockEntries` arrays):**
+
+| Field | Type | Description |
+|---|---|---|
+| `colorHex` | `string` | 6 hex digits **without** `#` (e.g. `"FF0000"`). Case-insensitive input; stored as uppercase. |
+| `size` | `clothingSize` | One of `"34"`, `"36"`, `"38"`, `"40"`, `"42"`, `"44"`, `"46"`, `"48"`. |
+| `stock` | `integer ≥ 0` | Number of units available. |
+
+**`ProductStock` row (returned in `stock` arrays of create/update responses):**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `number` | Auto-generated primary key. |
+| `productId` | `number` | FK to the parent product. |
+| `colorHex` | `string` | 6 uppercase hex digits without `#`. |
+| `size` | `clothingSize` | Clothing size enum value. |
+| `stock` | `number` | Available units (always ≥ 0). |
+
+> **Uniqueness:** The `(productId, colorHex, size)` triple is unique. Sending duplicate entries in `stockEntries` will cause a DB-level constraint error.  
+> **Replace semantics on update:** When `stockEntries` is provided in `PUT /products/:id`, the entire existing stock grid is deleted and replaced atomically. Omit `stockEntries` to leave the current stock untouched.
 
 ---
 
