@@ -437,6 +437,11 @@ const orderProductSchema = z.object({
 
   // Color and size are optional – not every product has them.
   color: z.string().trim().min(1).optional(),
+  /**
+   * Hex code of the chosen color variant (6 hex digits, no "#").
+   * Required alongside `color` when the product has stock tracking entries.
+   */
+  colorHex: colorHexSchema.optional(),
   size: z.string().trim().min(1).optional(),
 });
 
