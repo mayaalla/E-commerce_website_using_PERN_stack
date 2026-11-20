@@ -76,7 +76,10 @@ function hasPermission(
 // also grant access. super_admin and full_access bypass these checks.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function authorize(permission: AdminPermission) {
+export function authorize(permission: AdminPermission | readonly AdminPermission[]) {
+  const requiredPermissions =
+    typeof permission === "string" ? [permission] : permission;
+
   return (req: Request, res: Response, next: NextFunction): void => {
     // ── Step 1: Ensure the request was authenticated first ───────────────
     if (!req.admin) {
@@ -101,7 +104,9 @@ export function authorize(permission: AdminPermission) {
     }
 
     // ── Step 4: Specific permission check ────────────────────────────────
-    if (hasPermission(permissions, permission)) {
+    if (requiredPermissions.some((requiredPermission) =>
+      hasPermission(permissions, requiredPermission)
+    )) {
       next();
       return;
     }
