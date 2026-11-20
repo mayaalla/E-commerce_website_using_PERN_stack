@@ -37,12 +37,12 @@ router.get("/", authenticate,
    getAllCoupons);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /api/coupons/validate/:code
-// Must be declared BEFORE /:id so Express doesn't try to parse "validate"
-// as a numeric id.
+// GET /api/coupons/validate?code=:code
+// Uses a query-string param so Express never confuses "validate" with a
+// numeric :id. Must still be declared BEFORE /:id as a safeguard.
 // ─────────────────────────────────────────────────────────────────────────────
 router.get(
-  "/validate/:code",
+  "/validate",
   // authenticate,
   // authorize("coupon_read"),
   validateCouponCode
@@ -78,3 +78,4 @@ router.put(
 router.delete("/:id", authenticate, authorize("coupon_delete"), validateId(), deleteCouponById);
 
 export default router;
+
