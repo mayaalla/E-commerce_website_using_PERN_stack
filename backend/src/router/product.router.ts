@@ -7,6 +7,7 @@ import {
   getProductsByCategory,
   updateProductById,
   deleteProductById,
+  getProductStock,
 } from "../controller/product.controller.js";
 import { requestUploadTokens } from "../controller/upload.controller.js";
 import {
@@ -14,6 +15,7 @@ import {
   validateUpdateProduct,
   validateId,
   validateRequestUploadTokens,
+  validateProductQuery,
 } from "../middleware/validation.js";
 import { authenticate } from "../middleware/authentication.js";
 import { authorize } from "../middleware/authirization.js";
@@ -43,7 +45,7 @@ router.post(
   "/upload/request-tokens",
   uploadRateLimit,
   authenticate,
-  authorize("product_add"),
+  authorize(["product_add", "product_update"]),
   validateRequestUploadTokens,
   requestUploadTokens
 );
@@ -63,9 +65,11 @@ router.post(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/products
+// Supports: ?search= &categoryId= &size= &color= &priceMin= &priceMax=
+//           &hasPromo= &sortBy= &sortOrder= &page= &limit=
 // ─────────────────────────────────────────────────────────────────────────────
-// router.get("/", authenticate, authorize("product_read"), getAllProducts);
-router.get("/", getAllProducts);
+// router.get("/", authenticate, authorize("product_read"), validateProductQuery, getAllProducts);
+router.get("/", validateProductQuery, getAllProducts);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/products/by-category/:categoryId
@@ -115,4 +119,11 @@ router.delete(
   deleteProductById
 );
 
+
+router.get(
+  "/:id/stock",
+  validateId(),
+  getProductStock
+);
 export default router;
+
