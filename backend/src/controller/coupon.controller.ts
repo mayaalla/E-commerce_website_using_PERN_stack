@@ -129,7 +129,11 @@ export async function validateCouponCode(
   next: NextFunction
 ): Promise<void> {
   try {
-    const code = String(req.params.code).trim().toUpperCase();
+    const code = String(req.query.code ?? "").trim().toUpperCase();
+
+    if (!code) {
+      return next(createHttpError(400, "Missing required query parameter: code"));
+    }
     const coupon = await validateCouponCodeService(code);
 
     res.status(200).json({ success: true, data: coupon });
@@ -205,3 +209,4 @@ export async function deleteCouponById(
     next(error);
   }
 }
+
