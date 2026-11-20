@@ -75,7 +75,7 @@ export const orderStatus = pgEnum("order_status", [
   "canceled",
   // A COD order that the customer did not collect.
   "returned",
-  "shipped",
+  "delivered",
 ]);
 
 export const shippingCompanyStatus = pgEnum("shipping_company_status", [

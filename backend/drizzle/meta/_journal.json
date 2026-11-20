@@ -57,6 +57,13 @@
       "when": 1795090677580,
       "tag": "0007_worried_nitro",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795196985104,
+      "tag": "0008_fair_banshee",
+      "breakpoints": true
     }
   ]
 }
