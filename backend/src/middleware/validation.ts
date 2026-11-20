@@ -13,11 +13,18 @@ const phoneNumberSchema = z
   .trim()
   .regex(/^0[0-9]{9}$/, "Phone number must be 10 digits and start with 0");
 
-// A monetary value: a positive number with at most 2 decimal places.
+// A monetary value: a non-negative number with at most 2 decimal places.
 // We accept either a number or a numeric string (Drizzle stores numerics as strings).
+// Values are normalised before the regex check so round-tripped DB strings such as
+// "1500.00" or "29.900" pass cleanly without requiring the caller to strip zeros.
 const moneySchema = z
   .union([z.number(), z.string()])
-  .transform((v) => String(v))
+  .transform((v) => {
+    const n = parseFloat(String(v));
+    if (isNaN(n)) return String(v); // pass through; the regex pipe will reject it
+    // Canonical form: strip trailing decimal zeros → "1500.00" → "1500", "29.90" → "29.9"
+    return n.toFixed(2).replace(/\.?0+$/, "");
+  })
   .pipe(
     z
       .string()
@@ -66,7 +73,7 @@ const orderStatuses = [
   "pending",
   "canceled",
   "returned",
-  "shipped",
+  "delivered",
 ] as const;
 
 // Coupon status values that exist in the database enum.
@@ -217,6 +224,17 @@ export const validateCategory = validate(categorySchema);
 // ═════════════════════════════════════════════════════════════
 
 // Schema for creating a new product.
+const productImageUploadSchema = z.object({
+  publicId: z.string().min(1, "publicId is required"),
+  version: z
+    .number()
+    .int("version must be a whole number")
+    .positive("version must be positive"),
+  signature: z.string().min(1, "signature is required"),
+  // When present, this upload replaces that existing product image.
+  replaceImage: z.string().trim().min(1).optional(),
+});
+
 const createProductSchema = z.object({
   title: z.string().trim().min(1, "Title is required"),
 
@@ -243,16 +261,7 @@ const createProductSchema = z.object({
   // Optional Cloudinary upload confirmations.
   // Each entry is verified server-side before the product is inserted.
   imageUploads: z
-    .array(
-      z.object({
-        publicId: z.string().min(1, "publicId is required"),
-        version: z
-          .number()
-          .int("version must be a whole number")
-          .positive("version must be positive"),
-        signature: z.string().min(1, "signature is required"),
-      })
-    )
+    .array(productImageUploadSchema.omit({ replaceImage: true }))
     .min(0)
     .max(8, "At most 8 images are allowed per product")
     .optional(),
@@ -281,6 +290,17 @@ const createProductSchema = z.object({
 // When `stockEntries` is provided, it replaces the entire stock grid atomically.
 const updateProductSchema = createProductSchema.partial().extend({
   promo: z.union([moneySchema, z.null()]).optional(),
+  imageUploads: z
+    .array(productImageUploadSchema)
+    .max(8, "At most 8 images are allowed per product")
+    .optional(),
+  imageRemovals: z
+    .array(z.string().trim().min(1, "Image URL is required"))
+    .max(8, "At most 8 images can be removed at once")
+    .refine((images) => new Set(images).size === images.length, {
+      message: "An image can only be removed once",
+    })
+    .optional(),
 });
 
 export const validateCreateProduct = validate(createProductSchema);
@@ -481,7 +501,7 @@ const createOrderSchema = z.object({
   couponCode: z.string().trim().optional(),
 });
 
-// Schema for updating an order's status only (e.g. from "pending" to "shipped").
+// Schema for updating an order's status only (e.g. from "pending" to "delivered").
 // In Zod v4 the custom error param is "error", not "errorMap".
 const updateOrderStatusSchema = z.object({
   status: z.enum(orderStatuses, {
@@ -491,6 +511,66 @@ const updateOrderStatusSchema = z.object({
 
 export const validateCreateOrder = validate(createOrderSchema);
 export const validateUpdateOrderStatus = validate(updateOrderStatusSchema);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ORDER QUERY VALIDATOR
+// Validates pagination, filters, search, and sorting query-string params
+// for GET /api/orders.  Reads from req.query (not req.body).
+// ─────────────────────────────────────────────────────────────────────────────
+import {
+  orderQuerySchema,
+  updateOrderInformationSchema,
+} from "../schema/order.schema.js";
+import { productQuerySchema } from "../schema/product.schema.js";
+
+export const validateUpdateOrderInformation = validate(
+  updateOrderInformationSchema
+);
+
+export const validateOrderQuery = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  const result = orderQuerySchema.safeParse(req.query);
+
+  if (!result.success) {
+    const errors = result.error.issues.map(
+      (e: z.ZodIssue) => `${e.path.join(".")}: ${e.message}`
+    );
+    res.status(400).json({ success: false, errors });
+    return;
+  }
+
+  // Attach the parsed/typed query to res.locals so the controller can read it.
+  res.locals.orderQuery = result.data;
+  next();
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRODUCT QUERY VALIDATOR
+// Validates pagination, filters, search, and sorting query-string params
+// for GET /api/products.  Reads from req.query (not req.body).
+// ─────────────────────────────────────────────────────────────────────────────
+export const validateProductQuery = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  const result = productQuerySchema.safeParse(req.query);
+
+  if (!result.success) {
+    const errors = result.error.issues.map(
+      (e: z.ZodIssue) => `${e.path.join(".")}: ${e.message}`
+    );
+    res.status(400).json({ success: false, errors });
+    return;
+  }
+
+  // Attach the parsed/typed query to res.locals so the controller can read it.
+  res.locals.productQuery = result.data;
+  next();
+};
 
 // ═════════════════════════════════════════════════════════════
 // ███  IMAGE UPLOAD VALIDATORS
