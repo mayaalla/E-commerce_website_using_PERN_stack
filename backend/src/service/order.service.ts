@@ -1,4 +1,4 @@
-import { and, eq, desc, inArray, isNull, sql, notInArray } from "drizzle-orm";
+import { and, eq, desc, asc, inArray, isNull, sql, notInArray, ilike, gte, lte, or } from "drizzle-orm";
 
 import { db } from "../db/db.js";
 import {
@@ -12,6 +12,10 @@ import {
   type OrderProduct,
 } from "../db/schema.js";
 import { validateCouponCodeService } from "./coupon.service.js";
+import type {
+  OrderQuery,
+  UpdateOrderInformation,
+} from "../schema/order.schema.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -82,6 +86,8 @@ export type CreateOrderResult = {
 export type UpdateOrderStatusPayload = {
   status: Order["status"];
 };
+
+export type UpdateOrderInformationPayload = UpdateOrderInformation;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Typed service errors
@@ -447,25 +453,208 @@ export async function getOrderByIdService(id: number): Promise<Order> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Read all
-// Return every order, most-recent first.
+// Read all  –  with pagination, search, filters and sorting
+//
+// Search (single input) matches any of:
+//   • customer name        (ILIKE)
+//   • phone number         (ILIKE)
+//   • order id             (cast to text, exact prefix match)
+//   • wilaya name          (JOIN wilayas, ILIKE)
+//
+// Filters:
+//   status | wilayaCode | dateFrom | dateTo | totalMin | totalMax
+//
+// Sorting: any allowed column, asc or desc.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function getAllOrdersService(): Promise<Order[]> {
-  // Return only non-deleted orders, ordered most-recent first.
-  return db
-    .select()
-    .from(orders)
-    .where(isNull(orders.deletedAt))
-    .orderBy(desc(orders.id));
+/** Shape returned by getAllOrdersService. */
+export type PaginatedOrders = {
+  data: Order[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+};
+
+export async function getAllOrdersService(
+  query: OrderQuery
+): Promise<PaginatedOrders> {
+  const {
+    page,
+    limit,
+    search,
+    status,
+    wilayaCode,
+    dateFrom,
+    dateTo,
+    totalMin,
+    totalMax,
+    sortBy,
+    sortOrder,
+  } = query;
+
+  const offset = (page - 1) * limit;
+
+  // ── Build the WHERE conditions ────────────────────────────────────────────
+  // Start with the mandatory soft-delete filter.
+  const conditions: ReturnType<typeof and>[] = [isNull(orders.deletedAt)];
+
+  // Discrete filters
+  if (status) {
+    conditions.push(eq(orders.status, status));
+  }
+  if (wilayaCode) {
+    conditions.push(eq(orders.wilayaCode, wilayaCode));
+  }
+  if (dateFrom) {
+    conditions.push(gte(orders.date, dateFrom));
+  }
+  if (dateTo) {
+    conditions.push(lte(orders.date, dateTo));
+  }
+  if (totalMin !== undefined) {
+    conditions.push(gte(orders.total, String(totalMin)));
+  }
+  if (totalMax !== undefined) {
+    conditions.push(lte(orders.total, String(totalMax)));
+  }
+
+  // Global search – matched against name, phone, id (cast), wilaya name (join)
+  if (search) {
+    const term = `%${search}%`;
+    conditions.push(
+      or(
+        ilike(orders.name, term),
+        ilike(orders.phoneNumber, term),
+        // Cast numeric id to text so we can do a prefix ILIKE on it
+        sql`${orders.id}::text ILIKE ${term}`,
+        // Sub-select: order's wilaya name from the wilayas table
+        sql`EXISTS (
+          SELECT 1 FROM wilayas w
+          WHERE w.code = ${orders.wilayaCode}
+            AND w.name ILIKE ${term}
+        )`
+      )!
+    );
+  }
+
+  const where = and(...conditions);
+
+  // ── Sort column mapping ───────────────────────────────────────────────────
+  const columnMap = {
+    id: orders.id,
+    name: orders.name,
+    phoneNumber: orders.phoneNumber,
+    wilayaCode: orders.wilayaCode,
+    total: orders.total,
+    date: orders.date,
+    status: orders.status,
+  } as const;
+
+  const sortColumn = columnMap[sortBy as keyof typeof columnMap] ?? orders.id;
+  const orderDir = sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
+
+  // ── Fetch data + total count in parallel ─────────────────────────────────
+  const [rows, [countRow]] = await Promise.all([
+    db
+      .select()
+      .from(orders)
+      .where(where)
+      .orderBy(orderDir)
+      .limit(limit)
+      .offset(offset),
+
+    db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(orders)
+      .where(where),
+  ]);
+
+  const total = countRow?.count ?? 0;
+
+  return {
+    data: rows,
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Update customer information
+//
+// Only name, phone number, wilaya, and commune can be changed. The selected
+// commune must belong to the resulting wilaya so the order keeps a valid
+// delivery address.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function updateOrderInformationService(
+  id: number,
+  payload: UpdateOrderInformationPayload
+): Promise<Order> {
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(orders)
+      .where(and(isNull(orders.deletedAt), eq(orders.id, id)))
+      .limit(1)
+      .for("update");
+
+    if (!existing) {
+      throw serviceError(`Order with id ${id} not found`, "NOT_FOUND");
+    }
+
+    const wilayaCode = payload.wilayaCode ?? existing.wilayaCode;
+    const communeId = payload.communeId ?? existing.communeId;
+    const updatesDeliveryLocation =
+      payload.wilayaCode !== undefined || payload.communeId !== undefined;
+
+    if (updatesDeliveryLocation) {
+      if (payload.wilayaCode !== undefined) {
+        await assertWilayaExists(wilayaCode, tx);
+      }
+
+      const [commune] = await tx
+        .select({ id: communes.id, wilayaId: communes.wilayaId })
+        .from(communes)
+        .where(eq(communes.id, communeId))
+        .limit(1);
+
+      if (!commune) {
+        throw serviceError(
+          `Commune with id ${communeId} not found`,
+          "NOT_FOUND"
+        );
+      }
+
+      if (commune.wilayaId !== wilayaCode) {
+        throw serviceError(
+          `Commune with id ${communeId} does not belong to wilaya "${wilayaCode}"`,
+          "INVALID_ORDER_ADDRESS"
+        );
+      }
+    }
+
+    const [updated] = await tx
+      .update(orders)
+      .set(payload)
+      .where(eq(orders.id, id))
+      .returning();
+
+    return updated;
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Update status
 //
-// Only the `status` field is mutable after creation.  Everything else (pricing,
-// products, shipping selection) represents the customer's frozen intent at
-// checkout time and must never change.
+// This operation changes only the `status` field. Customer contact and
+// delivery information have their own targeted update service above.
 //
 // Additional business rule: once an order reaches a terminal state
 // ("canceled" or "returned") it cannot transition to any other state.
@@ -549,7 +738,7 @@ export async function deleteOrderByIdService(id: number): Promise<Order> {
 //
 // Only revenue-generating statuses are counted:
 //   ✅ confirmed  – order accepted and paid
-//   ✅ shipped    – in transit, payment collected
+//   ✅ delivered    – in transit, payment collected
 //   ❌ pending    – not yet confirmed
 //   ❌ canceled   – no money collected
 //   ❌ returned   – money refunded
@@ -557,7 +746,7 @@ export async function deleteOrderByIdService(id: number): Promise<Order> {
 
 /** Shape returned by getOrderStatsService. */
 export type OrderStats = {
-  /** Total revenue from confirmed + shipped orders (all time, including soft-deleted rows). */
+  /** Total revenue from confirmed + delivered orders (all time, including soft-deleted rows). */
   totalRevenue: string;
   /** Total number of orders visible in the dashboard (soft-deleted excluded). */
   activeOrderCount: number;
@@ -565,11 +754,11 @@ export type OrderStats = {
   allTimeOrderCount: number;
 };
 
-const REVENUE_STATUSES: Order["status"][] = ["confirmed", "shipped"];
+const REVENUE_STATUSES: Order["status"][] = ["confirmed", "delivered"];
 
 export async function getOrderStatsService(): Promise<OrderStats> {
   // ── Revenue ──────────────────────────────────────────────────────────────
-  // SUM(total) across every confirmed/shipped order regardless of deletedAt.
+  // SUM(total) across every confirmed/delivered order regardless of deletedAt.
   // Using a raw SQL aggregation so we do a single round-trip.
   const [revenueRow] = await db
     .select({
