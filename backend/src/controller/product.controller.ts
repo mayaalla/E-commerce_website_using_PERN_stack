@@ -8,7 +8,9 @@ import {
   deleteProductByIdService,
   type CreateProductPayload,
   type UpdateProductPayload,
+  getProductStockService,
 } from "../service/product.service.js";
+import type { ProductQuery } from "../schema/product.schema.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -30,7 +32,8 @@ const isUploadVerificationFailure = (err: unknown): boolean =>
   err instanceof Error &&
   (/verification failed/i.test(err.message) ||
     /token not found/i.test(err.message) ||
-    /too many images/i.test(err.message));
+    /too many images/i.test(err.message) ||
+    /image update failed/i.test(err.message));
 
 const isStockConstraintViolation = (err: unknown): boolean =>
   err instanceof Error &&
@@ -78,10 +81,14 @@ export async function createProduct(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/products
+// Query params validated by validateProductQuery middleware.
+// Supports: search, categoryId, size, color, priceMin, priceMax, hasPromo,
+//           sortBy, sortOrder, page, limit.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Returns all products.
+ * Returns a paginated list of products.
+ * All filtering, searching and sorting is delegated to the service layer.
  */
 export async function getAllProducts(
   _req: Request,
@@ -89,9 +96,10 @@ export async function getAllProducts(
   next: NextFunction
 ): Promise<void> {
   try {
-    const products = await getAllProductsService();
+    const query = res.locals.productQuery as ProductQuery;
+    const result = await getAllProductsService(query);
 
-    res.status(200).json({ success: true, data: products });
+    res.status(200).json({ success: true, ...result });
   } catch (error) {
     next(error);
   }
@@ -171,6 +179,8 @@ export async function updateProductById(
   try {
     const id = Number(req.params.id);
     const payload = req.body as UpdateProductPayload;
+    // Bind upload confirmations to the authenticated admin, as in product creation.
+    payload.adminId = req.admin!.id;
     const product = await updateProductByIdService(id, payload);
 
     res.status(200).json({ success: true, data: product });
@@ -179,6 +189,9 @@ export async function updateProductById(
       return next(createHttpError(404, (error as Error).message));
     }
     if (isBusinessRuleViolation(error)) {
+      return next(createHttpError(422, (error as Error).message));
+    }
+    if (isUploadVerificationFailure(error)) {
       return next(createHttpError(422, (error as Error).message));
     }
     next(error);
@@ -209,6 +222,45 @@ export async function deleteProductById(
     if (isNotFound(error)) {
       return next(createHttpError(404, (error as Error).message));
     }
+    next(error);
+  }
+}
+
+
+// export async function getProductStockService(
+//   productId: number, colorHex?: string, size?: string
+// ): Promise<ProductStock[]> {
+
+//   const conditions = [eq(productStock.productId, productId)];
+
+//   if (colorHex) {
+//     conditions.push(eq(productStock.colorHex, colorHex.toUpperCase()));
+//   }
+
+//   if (size) {
+//     conditions.push(eq(productStock.size, size as ProductStock["size"]));
+//   }
+
+//   const stock = await db
+//     .select()
+//     .from(productStock)
+//     .where(and(...conditions));
+//   return stock;
+// }
+
+export async function getProductStock(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const productId = Number(req.params.id);
+    const { colorHex, size } = req.query as { colorHex?: string; size?: string };
+    const stock: Awaited<ReturnType<typeof getProductStockService>> =
+      await getProductStockService(productId, colorHex, size);
+
+    res.status(200).json({ success: true, data: stock });
+  } catch (error) {
     next(error);
   }
 }
