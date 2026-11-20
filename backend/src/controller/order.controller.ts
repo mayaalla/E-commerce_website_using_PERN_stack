@@ -4,13 +4,16 @@ import {
   createOrderService,
   getOrderByIdService,
   getAllOrdersService,
+  updateOrderInformationService,
   updateOrderStatusService,
   deleteOrderByIdService,
   getOrderStatsService,
   type CreateOrderPayload,
+  type UpdateOrderInformationPayload,
   type UpdateOrderStatusPayload,
   type CreateOrderResult,
 } from "../service/order.service.js";
+import type { OrderQuery } from "../schema/order.schema.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared HTTP error factory
@@ -50,6 +53,9 @@ const isCouponUnavailable = (err: unknown) =>
 
 const isTerminalOrderStatus = (err: unknown) =>
   errorCode(err) === "TERMINAL_ORDER_STATUS";
+
+const isInvalidOrderAddress = (err: unknown) =>
+  errorCode(err) === "INVALID_ORDER_ADDRESS";
 
 const isInsufficientStock = (err: unknown) =>
   errorCode(err) === "INSUFFICIENT_STOCK";
@@ -99,20 +105,36 @@ export async function createOrder(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/orders
+// Supports: pagination, search, filters, sorting via query params.
+// Query params are pre-validated and typed by validateOrderQuery middleware.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Returns all orders ordered by most-recent first.
+ * Returns a paginated list of orders.
+ *
+ * Query params:
+ *   page       – page number (default 1)
+ *   limit      – rows per page (default 20, max 100)
+ *   search     – searches name, phone number, order id, wilaya name
+ *   status     – filter by status (confirmed|pending|canceled|returned|delivered)
+ *   wilayaCode – filter by 2-digit wilaya code
+ *   dateFrom   – filter orders on or after YYYY-MM-DD
+ *   dateTo     – filter orders on or before YYYY-MM-DD
+ *   totalMin   – filter orders with total >= value
+ *   totalMax   – filter orders with total <= value
+ *   sortBy     – sort column (id|name|phoneNumber|wilayaCode|total|date|status)
+ *   sortOrder  – asc | desc (default desc)
  */
 export async function getAllOrders(
-  _req: Request,
+  req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const allOrders = await getAllOrdersService();
+    const orderQuery = res.locals.orderQuery as OrderQuery;
+    const result = await getAllOrdersService(orderQuery);
 
-    res.status(200).json({ success: true, data: allOrders });
+    res.status(200).json({ success: true, ...result });
   } catch (error) {
     next(error);
   }
@@ -146,6 +168,38 @@ export async function getOrderById(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PATCH /api/orders/:id
+// Param and customer information body are validated by middleware.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Updates the customer's name, phone number, wilaya, and/or commune.
+ * Returns 404 when the order or a referenced location does not exist, and
+ * 400 when the selected commune does not belong to the selected wilaya.
+ */
+export async function updateOrderInformation(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const id = Number(req.params.id);
+    const payload = req.body as UpdateOrderInformationPayload;
+    const order = await updateOrderInformationService(id, payload);
+
+    res.status(200).json({ success: true, data: order });
+  } catch (error) {
+    if (isNotFound(error)) {
+      return next(createHttpError(404, (error as Error).message));
+    }
+    if (isInvalidOrderAddress(error)) {
+      return next(createHttpError(400, (error as Error).message));
+    }
+    next(error);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PATCH /api/orders/:id/status
 // Param validated by validateId(), body validated by validateUpdateOrderStatus.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -153,7 +207,7 @@ export async function getOrderById(
 /**
  * Updates the status of an existing order.
  *
- * Only the `status` field is mutable after creation.
+ * Only the `status` field is changed by this operation.
  * Orders in a terminal state ("canceled", "returned") cannot be updated.
  *
  * Returns 200 + the updated record on success.
@@ -223,7 +277,7 @@ export async function deleteOrderById(
 
 /**
  * Returns store-wide order stats:
- *   - totalRevenue: sum of all confirmed + shipped orders (ever placed, including archived)
+ *   - totalRevenue: sum of all confirmed + delivered orders (ever placed, including archived)
  *   - activeOrderCount: orders visible in the dashboard (soft-deleted excluded)
  *   - allTimeOrderCount: every order ever placed
  */
