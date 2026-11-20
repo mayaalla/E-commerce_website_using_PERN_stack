@@ -4,14 +4,17 @@ import {
   createOrder,
   getAllOrders,
   getOrderById,
+  updateOrderInformation,
   updateOrderStatus,
   deleteOrderById,
   getOrderStats,
 } from "../controller/order.controller.js";
 import {
   validateCreateOrder,
+  validateUpdateOrderInformation,
   validateUpdateOrderStatus,
   validateId,
+  validateOrderQuery,
 } from "../middleware/validation.js";
 import { authenticate } from "../middleware/authentication.js";
 import { authorize } from "../middleware/authirization.js";
@@ -35,9 +38,11 @@ router.post(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/orders
-// Returns all orders, most-recent first.
+// Supports pagination, search, filters, and sorting via query params.
+// validateOrderQuery parses & validates the query string; on success it stores
+// the typed result in res.locals.orderQuery for the controller to consume.
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/", authenticate, authorize("order_read"), getAllOrders);
+router.get("/", authenticate, authorize("order_read"), validateOrderQuery, getAllOrders);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/orders/stats
@@ -53,8 +58,21 @@ router.get("/stats", authenticate, authorize("order_read"), getOrderStats);
 router.get("/:id", authenticate, authorize("order_read"), validateId(), getOrderById);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PATCH /api/orders/:id
+// Update only customer contact and delivery information.
+// ─────────────────────────────────────────────────────────────────────────────
+router.patch(
+  "/:id",
+  authenticate,
+  authorize("order_update"),
+  validateId(),
+  validateUpdateOrderInformation,
+  updateOrderInformation
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PATCH /api/orders/:id/status
-// Only the status field is mutable after creation.
+// Update the status without changing customer information.
 // Using PATCH (not PUT) to signal a partial, targeted update.
 // ─────────────────────────────────────────────────────────────────────────────
 router.patch(
