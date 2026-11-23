@@ -1,11 +1,15 @@
 import { apiClient } from "@/lib/api-client";
-import { UpdateProductRequest, UpdateProductResponse } from "../types";
+import type { UpdateProductRequest, UpdateProductResponse } from "../types";
+import { productResponseSchema, updateProductRequestSchema } from "../schemas";
 import { AxiosError } from "axios";
 
 const updateProduct = async (id: number, data: UpdateProductRequest): Promise<UpdateProductResponse> => {
+    const payload = updateProductRequestSchema.parse(data);
+    let responseData: unknown;
+
     try {
-        const response = await apiClient.put<UpdateProductResponse>(`/products/${id}`, data);
-        return response.data;
+        const response = await apiClient.put<unknown>(`/products/${id}`, payload);
+        responseData = response.data;
     } catch (error) {
         if (error instanceof AxiosError) {
             if (error.response) {
@@ -26,6 +30,8 @@ const updateProduct = async (id: number, data: UpdateProductRequest): Promise<Up
         if (error instanceof Error) throw error;
         throw new Error("An unexpected error occurred while updating the product.");
     }
+
+    return productResponseSchema.parse(responseData);
 };
 
 export default updateProduct;
