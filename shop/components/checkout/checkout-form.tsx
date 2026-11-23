@@ -21,11 +21,13 @@ import {
   communesApi,
   couponsApi,
   ordersApi,
+  productsApi,
   shippingApi,
   type Commune,
   type CouponValidationResult,
   type CreateOrderResult,
   type Product,
+  type ProductStock,
   type ShippingCompany,
   type ShippingPrice,
   type Wilaya,
@@ -47,6 +49,7 @@ type CheckoutLine = {
   quantity: number;
   size?: string;
   color?: string;
+  colorHex?: string;
 };
 
 type OrderReceipt = {
@@ -58,6 +61,7 @@ type OrderReceipt = {
 
 type CheckoutFormProps = {
   directProduct: Product | null;
+  directProductStock: ProductStock[] | null;
   directProductError?: boolean;
   initialSelectedSize?: string;
   initialSelectedColor?: string;
@@ -79,6 +83,65 @@ function priceFor(product: Product) {
   return product.promo !== null && Number(product.promo) < Number(product.price)
     ? product.promo
     : product.price;
+}
+
+function resolveLegacyColorHex(
+  colorValue: string | undefined,
+  product: Product | undefined,
+): string | undefined {
+  if (!colorValue || !product) return undefined;
+
+  const candidates = [colorValue.trim()];
+  try {
+    const parsed: unknown = JSON.parse(colorValue);
+    if (typeof parsed === "object" && parsed !== null) {
+      const record = parsed as { name?: unknown; hex?: unknown };
+      if (typeof record.name === "string") candidates.push(record.name.trim());
+      if (typeof record.hex === "string") candidates.push(record.hex.trim());
+    }
+  } catch {
+    // Older cart entries stored the color name directly.
+  }
+
+  return product.colors.find((productColor) =>
+    candidates.some((candidate) =>
+      productColor.hex === candidate.replace(/^#/, "").toUpperCase() ||
+      productColor.name.trim().toLocaleLowerCase() === candidate.toLocaleLowerCase(),
+    ),
+  )?.hex;
+}
+
+async function buildOrderProducts(
+  lines: CheckoutLine[],
+  directProduct: Product | null,
+) {
+  const productsById = new Map<number, Product>();
+  if (directProduct) productsById.set(directProduct.id, directProduct);
+
+  const legacyColorProductIds = [
+    ...new Set(
+      lines
+        .filter((line) => line.color && !line.colorHex)
+        .map((line) => line.productId)
+        .filter((id) => !productsById.has(id)),
+    ),
+  ];
+  const legacyProducts = await Promise.all(
+    legacyColorProductIds.map((id) => productsApi.getById(id)),
+  );
+  legacyProducts.forEach((product) => productsById.set(product.id, product));
+
+  return lines.map((line) => {
+    const colorHex =
+      line.colorHex ?? resolveLegacyColorHex(line.color, productsById.get(line.productId));
+
+    return {
+      productId: line.productId,
+      quantity: line.quantity,
+      ...(line.size ? { size: line.size } : {}),
+      ...(colorHex ? { colorHex } : {}),
+    };
+  });
 }
 
 function describeOrderError(error: unknown) {
@@ -231,6 +294,7 @@ function CheckoutSelect({
 
 export function CheckoutForm({
   directProduct,
+  directProductStock,
   directProductError = false,
   initialSelectedSize = "",
   initialSelectedColor = "",
@@ -385,7 +449,8 @@ export function CheckoutForm({
           image: directProduct.images[0] ?? null,
           quantity: initialQuantity,
           size: selectedSize || undefined,
-          color: selectedColor || undefined,
+          color: directProduct.colors.find((color) => color.hex === selectedColor)?.name,
+          colorHex: selectedColor || undefined,
         },
       ]
     : cartLines;
@@ -434,7 +499,7 @@ export function CheckoutForm({
     );
   }
 
-  if (directProduct && isProductOutOfStock(directProduct)) {
+  if (directProduct && isProductOutOfStock(directProduct, directProductStock)) {
     return (
       <section className="mx-auto w-full max-w-3xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         <h1 className="text-3xl font-medium tracking-tight">Cet article est en rupture de stock</h1>
@@ -530,12 +595,7 @@ export function CheckoutForm({
         wilayaCode,
         communeId: Number(communeId),
         shippingCompanyId: Number(companyId),
-        products: lines.map((line) => ({
-          productId: line.productId,
-          quantity: line.quantity,
-          size: line.size,
-          color: line.color,
-        })),
+        products: await buildOrderProducts(lines, directProduct),
         ...(couponCode.trim() ? { couponCode: couponCode.trim() } : {}),
       });
 
@@ -705,7 +765,9 @@ export function CheckoutForm({
                       disabled={isSubmitting}
                     >
                       {directProduct.colors.map((color) => (
-                        <SelectItem key={color} value={color}>{color}</SelectItem>
+                        <SelectItem key={color.hex} value={color.hex}>
+                          {color.name}
+                        </SelectItem>
                       ))}
                     </CheckoutSelect>
                   ) : null}
