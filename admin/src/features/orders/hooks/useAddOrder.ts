@@ -8,8 +8,19 @@ export function useAddOrder() {
 
   return useMutation<CreateOrderResponse, Error, CreateOrderRequest>({
     mutationFn: addOrder,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
+    onSuccess: async (_response, variables) => {
+      const stockInvalidations = Array.from(
+        new Set(variables.products.map((item) => item.productId)),
+        (productId) =>
+          queryClient.invalidateQueries({
+            queryKey: ["products", productId, "stock"],
+          }),
+      );
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["orders"] }),
+        ...stockInvalidations,
+      ]);
     },
   });
 }
