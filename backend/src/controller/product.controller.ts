@@ -10,17 +10,8 @@ import {
   type UpdateProductPayload,
   getProductStockService,
 } from "../service/product.service.js";
-import type { ProductQuery } from "../schema/product.schema.js";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-function createHttpError(status: number, message: string): Error & { status: number } {
-  const err = new Error(message) as Error & { status: number };
-  err.status = status;
-  return err;
-}
+import type { ProductQuery, ProductStockQuery } from "../schema/product.schema.js";
+import { AppError, createHttpError } from "../middleware/error.js";
 
 const isNotFound = (err: unknown): boolean =>
   err instanceof Error && /not found/i.test(err.message);
@@ -35,11 +26,38 @@ const isUploadVerificationFailure = (err: unknown): boolean =>
     /too many images/i.test(err.message) ||
     /image update failed/i.test(err.message));
 
-const isStockConstraintViolation = (err: unknown): boolean =>
-  err instanceof Error &&
-  (/non.negative/i.test(err.message) ||
-    /stock/i.test(err.message) && /negative/i.test(err.message) ||
-    /color_hex/i.test(err.message));
+const pgCode = (error: unknown): string | undefined =>
+  (error as { code?: string })?.code ??
+  (error as { cause?: { code?: string } })?.cause?.code;
+
+function toHttpError(error: unknown): unknown {
+  if (error instanceof AppError) return error;
+
+  // The product service currently has its own AppError carrying statusCode.
+  // Convert it to the shared HTTP error so the global handler keeps its status.
+  if (error instanceof Error) {
+    const { statusCode } = error as Error & { statusCode?: unknown };
+    if (typeof statusCode === "number") {
+      return createHttpError(statusCode, error.message);
+    }
+  }
+
+  if (isNotFound(error)) return createHttpError(404, (error as Error).message);
+  if (isBusinessRuleViolation(error) || isUploadVerificationFailure(error)) {
+    return createHttpError(422, (error as Error).message);
+  }
+
+  switch (pgCode(error)) {
+    case "23505":
+      return createHttpError(409, "A color or stock entry with the same value already exists");
+    case "23503":
+      return createHttpError(422, "Stock must reference a color defined on the product");
+    case "23514":
+      return createHttpError(422, "A value violates a database constraint");
+  }
+
+  return error;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/products
@@ -66,16 +84,7 @@ export async function createProduct(
 
     res.status(201).json({ success: true, data: product });
   } catch (error) {
-    if (isNotFound(error)) {
-      return next(createHttpError(404, (error as Error).message));
-    }
-    if (isBusinessRuleViolation(error)) {
-      return next(createHttpError(422, (error as Error).message));
-    }
-    if (isUploadVerificationFailure(error)) {
-      return next(createHttpError(422, (error as Error).message));
-    }
-    next(error);
+    next(toHttpError(error));
   }
 }
 
@@ -101,7 +110,7 @@ export async function getAllProducts(
 
     res.status(200).json({ success: true, ...result });
   } catch (error) {
-    next(error);
+    next(toHttpError(error));
   }
 }
 
@@ -126,10 +135,7 @@ export async function getProductsByCategory(
 
     res.status(200).json({ success: true, data: products });
   } catch (error) {
-    if (isNotFound(error)) {
-      return next(createHttpError(404, (error as Error).message));
-    }
-    next(error);
+    next(toHttpError(error));
   }
 }
 
@@ -153,10 +159,7 @@ export async function getProductById(
 
     res.status(200).json({ success: true, data: product });
   } catch (error) {
-    if (isNotFound(error)) {
-      return next(createHttpError(404, (error as Error).message));
-    }
-    next(error);
+    next(toHttpError(error));
   }
 }
 
@@ -185,16 +188,7 @@ export async function updateProductById(
 
     res.status(200).json({ success: true, data: product });
   } catch (error) {
-    if (isNotFound(error)) {
-      return next(createHttpError(404, (error as Error).message));
-    }
-    if (isBusinessRuleViolation(error)) {
-      return next(createHttpError(422, (error as Error).message));
-    }
-    if (isUploadVerificationFailure(error)) {
-      return next(createHttpError(422, (error as Error).message));
-    }
-    next(error);
+    next(toHttpError(error));
   }
 }
 
@@ -219,34 +213,10 @@ export async function deleteProductById(
 
     res.status(200).json({ success: true, data: product });
   } catch (error) {
-    if (isNotFound(error)) {
-      return next(createHttpError(404, (error as Error).message));
-    }
-    next(error);
+    next(toHttpError(error));
   }
 }
 
-
-// export async function getProductStockService(
-//   productId: number, colorHex?: string, size?: string
-// ): Promise<ProductStock[]> {
-
-//   const conditions = [eq(productStock.productId, productId)];
-
-//   if (colorHex) {
-//     conditions.push(eq(productStock.colorHex, colorHex.toUpperCase()));
-//   }
-
-//   if (size) {
-//     conditions.push(eq(productStock.size, size as ProductStock["size"]));
-//   }
-
-//   const stock = await db
-//     .select()
-//     .from(productStock)
-//     .where(and(...conditions));
-//   return stock;
-// }
 
 export async function getProductStock(
   req: Request,
@@ -255,12 +225,11 @@ export async function getProductStock(
 ): Promise<void> {
   try {
     const productId = Number(req.params.id);
-    const { colorHex, size } = req.query as { colorHex?: string; size?: string };
-    const stock: Awaited<ReturnType<typeof getProductStockService>> =
-      await getProductStockService(productId, colorHex, size);
+    const { colorHex, size } = res.locals.productStockQuery as ProductStockQuery;
+    const stock = await getProductStockService(productId, colorHex, size);
 
     res.status(200).json({ success: true, data: stock });
   } catch (error) {
-    next(error);
+    next(toHttpError(error));
   }
 }
