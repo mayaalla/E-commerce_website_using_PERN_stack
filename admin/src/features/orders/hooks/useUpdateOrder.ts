@@ -7,7 +7,6 @@ import type {
   UpdateOrderStatusRequest,
   UpdateOrderStatusResponse,
 } from "../types";
-import { orderQueryKey } from "./useGetOrder";
 
 interface UpdateOrderStatusVariables {
   id: number;
@@ -24,9 +23,22 @@ export function useUpdateOrderStatus() {
 
   return useMutation<UpdateOrderStatusResponse, Error, UpdateOrderStatusVariables>({
     mutationFn: ({ id, data }) => updateOrder(id, data),
-    onSuccess: (_response, { id }) => {
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
-      queryClient.invalidateQueries({ queryKey: orderQueryKey(id) });
+    onSuccess: async (response, { data }) => {
+      const stockInvalidations =
+        data.status === "canceled" || data.status === "returned"
+          ? Array.from(
+              new Set(response.data.products.map((item) => item.productId)),
+              (productId) =>
+                queryClient.invalidateQueries({
+                  queryKey: ["products", productId, "stock"],
+                }),
+            )
+          : [];
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["orders"] }),
+        ...stockInvalidations,
+      ]);
     },
   });
 }
@@ -36,9 +48,8 @@ export function useUpdateOrderInfo() {
 
   return useMutation<UpdateOrderInfoResponse, Error, UpdateOrderInfoVariables>({
     mutationFn: ({ id, data }) => updateOrderInfo(id, data),
-    onSuccess: (_response, { id }) => {
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
-      queryClient.invalidateQueries({ queryKey: orderQueryKey(id) });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["orders"] });
     },
   });
 }
