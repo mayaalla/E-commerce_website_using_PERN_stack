@@ -16,6 +16,7 @@ import {
   validateId,
   validateRequestUploadTokens,
   validateProductQuery,
+  validateProductStockQuery,
 } from "../middleware/validation.js";
 import { authenticate } from "../middleware/authentication.js";
 import { authorize } from "../middleware/authirization.js";
@@ -120,10 +121,8 @@ router.delete(
 );
 
 
-router.get(
-  "/:id/stock",
-  validateId(),
-  getProductStock
-);
+router.get("/:id/stock", validateId(), validateProductStockQuery, getProductStock);
+
+
 export default router;
 
