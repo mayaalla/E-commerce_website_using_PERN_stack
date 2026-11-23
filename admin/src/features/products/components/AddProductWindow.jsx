@@ -22,8 +22,9 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { useGetCategories } from "@/features/categories";
-import { useAddProduct } from "@/features/products";
+import { useAddProduct } from "../hooks/useAddProduct";
 import { apiClient } from "@/lib/api-client";
+import { cloudinaryUploadResponseSchema, uploadResponseTokensSchema } from "../schemas";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CLOTHING_SIZES = ["34", "36", "38", "40", "42", "44", "46", "48"];
@@ -90,7 +91,7 @@ const INITIAL_FORM = {
 // Upload flow:
 //   1. User picks images → stored locally with Object URL previews.
 //   2. On submit:
-//        a. POST /products/upload/request-tokens  → [{ uploadUrl, token, publicId }]
+//        a. POST /products/upload/request-tokens  → signed Cloudinary token data
 //        b. Upload each file to Cloudinary (parallel)
 //        c. Collect { publicId, version, signature } from each Cloudinary response
 //        d. POST /products with the imageUploads array
@@ -239,6 +240,7 @@ function AddProductWindow() {
 			selectedColors: prev.selectedColors.filter((c) => c.hex !== key),
 			stockEntries: prev.stockEntries.filter((e) => e.colorHex !== colorHex),
 		}));
+		setErrors((prev) => ({ ...prev, colors: "" }));
 	}
 
 	/** Inline-rename a selected color chip */
@@ -250,6 +252,7 @@ function AddProductWindow() {
 				c.hex === key ? { ...c, name: newName } : c,
 			),
 		}));
+		setErrors((prev) => ({ ...prev, colors: "" }));
 	}
 
 	// ── Image picking ──────────────────────────────────────────────────────────
@@ -332,7 +335,10 @@ function AddProductWindow() {
 			})),
 		});
 
-		const tokens = tokenRes.data.data; // [{ publicId, signature, timestamp, apiKey, cloudName }]
+		const tokens = uploadResponseTokensSchema.parse(tokenRes.data).data;
+		if (tokens.length !== files.length) {
+			throw new Error("The server returned invalid image upload tokens.");
+		}
 
 		// 2. Upload every file to Cloudinary in parallel
 		const results = await Promise.all(
@@ -357,10 +363,13 @@ function AddProductWindow() {
 					);
 				}
 
-				const data = await res.json();
+				const data = cloudinaryUploadResponseSchema.parse(await res.json());
+				if (data.public_id !== publicId) {
+					throw new Error("The uploaded image did not match its signed upload token.");
+				}
 
 				return {
-					publicId: data.public_id ?? publicId,
+					publicId: data.public_id,
 					version: data.version,
 					signature: data.signature,
 				};
@@ -391,6 +400,13 @@ function AddProductWindow() {
 
 		if (!form.categoryId) next.categoryId = "Category is required.";
 
+		const colorNames = form.selectedColors.map((color) => color.name.trim());
+		if (colorNames.some((name) => !name)) {
+			next.colors = "Every selected color needs a name.";
+		} else if (new Set(colorNames.map((name) => name.toLowerCase())).size !== colorNames.length) {
+			next.colors = "Color names must be unique.";
+		}
+
 		setErrors(next);
 		return Object.keys(next).length === 0;
 	}
@@ -407,8 +423,10 @@ function AddProductWindow() {
 			);
 			setIsUploading(false);
 
-			// Send color names (or hex as fallback) to the backend
-			const colors = form.selectedColors.map((c) => c.name || c.hex);
+			const colors = form.selectedColors.map((color) => ({
+				name: color.name.trim(),
+				hex: color.hex.replace(/^#/, "").toUpperCase(),
+			}));
 
 			// Build stockEntries — only include rows that have both colorHex and stock set
 			const stockEntries = form.stockEntries
@@ -973,6 +991,12 @@ function AddProductWindow() {
 							</div>
 						)}
 					</div>
+
+					{errors.colors && (
+						<p role="alert" className="text-xs text-destructive">
+							{errors.colors}
+						</p>
+					)}
 
 					{/* ── Sizes ──────────────────────────────────────────────────── */}
 					<div className="flex flex-col gap-1.5">
