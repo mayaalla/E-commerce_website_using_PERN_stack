@@ -1,0 +1,45 @@
+services:
+  api:
+    build:
+      context: .
+      target: runner
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # Runs only on demand: docker compose run --rm migrate
+  migrate:
+    build:
+      context: .
+      target: tools
+    env_file:
+      - .env
+    profiles: ["tools"]
+
+volumes:
+  redis-data:
