@@ -60,6 +60,10 @@ const isInvalidOrderAddress = (err: unknown) =>
 const isInsufficientStock = (err: unknown) =>
   errorCode(err) === "INSUFFICIENT_STOCK";
 
+// NEW: thrown when a color/size is missing or does not belong to the product.
+const isInvalidVariant = (err: unknown) =>
+  errorCode(err) === "INVALID_VARIANT";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/orders
 // Body already validated by validateCreateOrder middleware.
@@ -69,12 +73,15 @@ const isInsufficientStock = (err: unknown) =>
  * Places a new order.
  *
  * The server recomputes the total from live product prices, so the client
- * cannot manipulate the charge by sending an incorrect total.
+ * cannot manipulate the charge by sending an incorrect total. The color name
+ * is resolved server-side from product_colors using `colorHex`.
  *
  * Returns 201 + the new order record and a full pricing breakdown on success.
  * Returns 404 if a referenced entity (wilaya, commune, company, product) does not exist.
+ * Returns 400 if the coupon code is invalid, the color/size is invalid for the
+ *   product (INVALID_VARIANT), or the commune does not belong to the wilaya.
+ * Returns 409 if there is not enough stock.
  * Returns 422 if the shipping price is not configured for the chosen company + wilaya.
- * Returns 400 if the coupon code does not exist or is no longer active.
  */
 export async function createOrder(
   req: Request,
@@ -94,6 +101,10 @@ export async function createOrder(
       return next(createHttpError(422, (error as Error).message));
     }
     if (isCouponNotFound(error) || isCouponUnavailable(error)) {
+      return next(createHttpError(400, (error as Error).message));
+    }
+    // CHANGED: invalid color/size and commune-not-in-wilaya are client errors.
+    if (isInvalidVariant(error) || isInvalidOrderAddress(error)) {
       return next(createHttpError(400, (error as Error).message));
     }
     if (isInsufficientStock(error)) {
@@ -209,6 +220,7 @@ export async function updateOrderInformation(
  *
  * Only the `status` field is changed by this operation.
  * Orders in a terminal state ("canceled", "returned") cannot be updated.
+ * Moving an order to "canceled" or "returned" restores its reserved stock.
  *
  * Returns 200 + the updated record on success.
  * Returns 404 if the order does not exist.
@@ -243,6 +255,7 @@ export async function updateOrderStatus(
 
 /**
  * Soft-deletes an order and returns its last snapshot.
+ * A pending or confirmed order releases its reserved stock when deleted.
  * Returns 200 + the deleted record on success.
  * Returns 404 if no order exists with the given id.
  */
@@ -263,7 +276,6 @@ export async function deleteOrderById(
     next(error);
   }
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/orders/stats
