@@ -9,8 +9,8 @@ import {
   productsApi,
   shippingApi,
   wilayasApi,
-  getProductStock,
   type Product,
+  type ProductStock,
   type ShippingCompany,
   type Wilaya,
 } from "@/lib/api";
@@ -25,6 +25,7 @@ type CheckoutPageProps = {
     productId?: string | string[];
     size?: string | string[];
     color?: string | string[];
+    colorHex?: string | string[];
     quantity?: string | string[];
   }>;
 };
@@ -60,6 +61,9 @@ async function CheckoutFormData({ searchParams }: CheckoutPageProps) {
     : params.productId;
   const requestedSize = Array.isArray(params.size) ? params.size[0] : params.size;
   const requestedColor = Array.isArray(params.color) ? params.color[0] : params.color;
+  const requestedColorHex = Array.isArray(params.colorHex)
+    ? params.colorHex[0]
+    : params.colorHex;
   const rawQuantity = Array.isArray(params.quantity)
     ? params.quantity[0]
     : params.quantity;
@@ -75,7 +79,7 @@ async function CheckoutFormData({ searchParams }: CheckoutPageProps) {
       : null;
   const invalidProductId = rawProductId !== undefined && productId === null;
 
-  const [wilayasResult, companiesResult, productResult] = await Promise.all([
+  const [wilayasResult, companiesResult, productResult, productStockResult] = await Promise.all([
     wilayasApi.getAll().then(
       (wilayas) => ({ wilayas, error: false }),
       () => ({ wilayas: [] as Wilaya[], error: true }),
@@ -93,9 +97,44 @@ async function CheckoutFormData({ searchParams }: CheckoutPageProps) {
           () => ({ product: null as Product | null, error: true }),
         )
       : Promise.resolve({ product: null as Product | null, error: false }),
+    productId
+      ? productsApi.getStock(productId).then(
+          (stockRows) => ({ stockRows, error: false }),
+          () => ({ stockRows: null as ProductStock[] | null, error: true }),
+        )
+      : Promise.resolve({ stockRows: null as ProductStock[] | null, error: false }),
   ]);
 
   const productError = invalidProductId || productResult.error || undefined;
+  const directProduct = productResult.product;
+  const directProductStock = productStockResult.stockRows;
+  const requestedColorValue = requestedColorHex ?? requestedColor;
+  const normalizedRequestedHex = requestedColorValue
+    ?.trim()
+    .replace(/^#/, "")
+    .toUpperCase();
+  const initialSelectedColor = directProduct?.colors.find(
+    (color) =>
+      color.hex === normalizedRequestedHex ||
+      color.name.toLocaleLowerCase() === requestedColorValue?.trim().toLocaleLowerCase(),
+  )?.hex ?? "";
+  const initialSelectedSize = directProduct?.sizes.includes(requestedSize ?? "")
+    ? requestedSize!
+    : "";
+  const availableQuantity =
+    directProductStock === null
+      ? null
+      : directProductStock
+          .filter(
+            (row) =>
+              (!initialSelectedColor || row.colorHex === initialSelectedColor) &&
+              (!initialSelectedSize || row.size === initialSelectedSize),
+          )
+          .reduce((total, row) => total + row.stock, 0);
+  const initialQuantity =
+    availableQuantity !== null && availableQuantity > 0
+      ? Math.min(requestedQuantity, availableQuantity)
+      : requestedQuantity;
 
   if (wilayasResult.error && companiesResult.error) {
     return (
@@ -115,29 +154,12 @@ async function CheckoutFormData({ searchParams }: CheckoutPageProps) {
 
   return (
     <CheckoutForm
-      directProduct={productResult.product}
+      directProduct={directProduct}
+      directProductStock={directProductStock}
       directProductError={productError}
-      initialSelectedSize={
-        requestedSize && productResult.product?.sizes.includes(requestedSize)
-          ? requestedSize
-          : ""
-      }
-      initialSelectedColor={
-        requestedColor && productResult.product?.colors.includes(requestedColor)
-          ? requestedColor
-          : ""
-      }
-      initialQuantity={
-        productResult.product
-          ? Math.max(
-              1,
-              Math.min(
-                requestedQuantity,
-                getProductStock(productResult.product) ?? requestedQuantity,
-              ),
-            )
-          : 1
-      }
+      initialSelectedSize={initialSelectedSize}
+      initialSelectedColor={initialSelectedColor}
+      initialQuantity={directProduct ? initialQuantity : 1}
       initialWilayas={wilayasResult.wilayas}
       initialCompanies={companiesResult.companies}
       initialDataError={wilayasResult.error || companiesResult.error}
