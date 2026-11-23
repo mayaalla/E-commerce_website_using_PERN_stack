@@ -52,33 +52,36 @@ async function ProductBreadcrumb({ params }: ProductPageProps) {
   const productId = Number(id);
   if (!Number.isSafeInteger(productId) || productId < 1) return null;
 
+  let title: string;
   try {
     const product = await getStorefrontProduct(productId);
-    return (
-      <nav aria-label="Fil d'Ariane" className="mb-6 text-sm text-muted-foreground sm:mb-8">
-        <ol className="flex flex-wrap items-center gap-2">
-          <li>
-            <Link href="/" className="underline-offset-4 hover:text-foreground hover:underline">
-              Accueil
-            </Link>
-          </li>
-          <li aria-hidden="true">/</li>
-          <li>
-            <Link href="/products" className="underline-offset-4 hover:text-foreground hover:underline">
-              Produits
-            </Link>
-          </li>
-          <li aria-hidden="true">/</li>
-          <li aria-current="page" className="max-w-48 truncate text-foreground sm:max-w-none">
-            {product.title}
-          </li>
-        </ol>
-      </nav>
-    );
+    title = product.title;
   } catch {
-    // Non-critical — show nothing if the breadcrumb fetch fails independently
+    // Non-critical: show nothing if the breadcrumb fetch fails independently
     return null;
   }
+
+  return (
+    <nav aria-label="Fil d'Ariane" className="mb-6 text-sm text-muted-foreground sm:mb-8">
+      <ol className="flex flex-wrap items-center gap-2">
+        <li>
+          <Link href="/" className="underline-offset-4 hover:text-foreground hover:underline">
+            Accueil
+          </Link>
+        </li>
+        <li aria-hidden="true">/</li>
+        <li>
+          <Link href="/products" className="underline-offset-4 hover:text-foreground hover:underline">
+            Produits
+          </Link>
+        </li>
+        <li aria-hidden="true">/</li>
+        <li aria-current="page" className="max-w-48 truncate text-foreground sm:max-w-none">
+          {title}
+        </li>
+      </ol>
+    </nav>
+  );
 }
 
 /* ─────────────────────── Zone 2: Product detail ─────────────── */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, useTransition, useEffect } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import {
   ArrowUpDown,
@@ -447,7 +447,12 @@ export function ProductCatalog({ products, categories }: ProductCatalogProps) {
   const pageProducts = visibleProducts.slice(pageStart, pageStart + pageSize);
 
   // Reset to p.1 whenever the filtered set changes
-  useEffect(() => { setCurrentPage(1); }, [visibleProducts.length, sort, search, viewMode]);
+  const resetKey = `${visibleProducts.length}|${sort}|${search}|${viewMode}`;
+  const [prevResetKey, setPrevResetKey] = useState(resetKey);
+  if (prevResetKey !== resetKey) {
+    setPrevResetKey(resetKey);
+    setCurrentPage(1);
+  }
 
   // ── Active filter chips ──
   const activeChips: { label: string; onRemove: () => void }[] = [];
@@ -489,7 +494,7 @@ export function ProductCatalog({ products, categories }: ProductCatalogProps) {
       <div className="border-b border-border py-24 text-center">
         <p className="text-sm text-muted-foreground">Aucun produit dans la collection pour le moment.</p>
         <Button className="mt-6 h-11 rounded-none px-6" render={<Link href="/" />}>
-          Retour à l'accueil
+          Retour à l&apos;accueil
         </Button>
       </div>
     );

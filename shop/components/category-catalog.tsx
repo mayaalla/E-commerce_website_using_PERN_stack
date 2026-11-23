@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, useTransition, useEffect } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import {
   ArrowUpDown,
@@ -593,7 +593,12 @@ export function CategoryCatalog({ products, categoryName }: CategoryCatalogProps
   const pageStart = (safePage - 1) * pageSize;
   const pageProducts = visibleProducts.slice(pageStart, pageStart + pageSize);
 
-  useEffect(() => { setCurrentPage(1); }, [visibleProducts.length, sort, search, viewMode]);
+  const resetKey = `${visibleProducts.length}|${sort}|${search}|${viewMode}`;
+  const [prevResetKey, setPrevResetKey] = useState(resetKey);
+  if (prevResetKey !== resetKey) {
+    setPrevResetKey(resetKey);
+    setCurrentPage(1);
+  }
 
   // ── Active filter chips ──
   const activeChips: { label: string; onRemove: () => void }[] = [];
