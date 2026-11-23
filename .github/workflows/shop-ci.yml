@@ -1,0 +1,41 @@
+name: Shop CI
+
+on:
+  pull_request:
+    paths: ["shop/**", ".github/workflows/shop-ci.yml"]
+  push:
+    branches: [main]
+    paths: ["shop/**", ".github/workflows/shop-ci.yml"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: shop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: shop/package-lock.json
+      - run: npm ci
+      - run: npm run lint --if-present
+      - run: npm run build
+      - run: npm test --if-present
+
+  docker:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./shop
+          build-args: |
+            NEXT_PUBLIC_API_URL=http://localhost:5000
+          push: false
+          cache-from: type=gha,scope=shop
+          cache-to: type=gha,mode=max,scope=shop

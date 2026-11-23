@@ -1,0 +1,41 @@
+name: Admin CI
+
+on:
+  pull_request:
+    paths: ["admin/**", ".github/workflows/admin-ci.yml"]
+  push:
+    branches: [main]
+    paths: ["admin/**", ".github/workflows/admin-ci.yml"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - run: npm ci
+      - run: npm run lint --if-present
+      - run: npm run build
+      - run: npm test --if-present
+
+  docker:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./admin
+          build-args: |
+           VITE_API_URL=http://localhost:5000/api
+          push: false
+          cache-from: type=gha,scope=admin
+          cache-to: type=gha,mode=max,scope=admin
