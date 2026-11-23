@@ -27,7 +27,7 @@ const app = express();
 app.disable('x-powered-by');
 app.use(helmet());
 app.use(cors({
-  origin: ["http://localhost:3000", "http://localhost:5174"],
+  origin: ["http://localhost:3000", process.env.CORS_ORIGINs],
   credentials: true,
 }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
