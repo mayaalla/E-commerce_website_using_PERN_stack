@@ -42,6 +42,9 @@ function OrderProductLine({ item }) {
 
   const quantity = Number(item.quantity);
   const lineTotal = Number(item.price) * quantity;
+  const colorHex = item.colorHex?.replace(/^#/, "").toUpperCase();
+  const hasValidColorHex = Boolean(colorHex && /^[0-9A-F]{6}$/.test(colorHex));
+  const colorLabel = item.color || (hasValidColorHex ? `#${colorHex}` : null);
 
   return (
     <li className="flex gap-3 rounded-lg border border-border bg-card p-3">
@@ -65,9 +68,25 @@ function OrderProductLine({ item }) {
         <p className="mt-1 text-xs text-muted-foreground">
           {quantity} × {formatDzd(item.price)}
         </p>
-        {(item.color || item.size) && (
+        {(colorLabel || item.size) && (
           <p className="mt-1 text-xs text-muted-foreground">
-            {[item.color, item.size && `Size ${item.size}`].filter(Boolean).join(" · ")}
+            {colorLabel && (
+              <span className="inline-flex items-center gap-1.5">
+                {hasValidColorHex && (
+                  <span
+                    aria-hidden="true"
+                    className="size-3 shrink-0 rounded-full border border-border"
+                    style={{ backgroundColor: `#${colorHex}` }}
+                  />
+                )}
+                <span>
+                  {colorLabel}
+                  {item.color && hasValidColorHex ? ` (#${colorHex})` : ""}
+                </span>
+              </span>
+            )}
+            {colorLabel && item.size ? " · " : ""}
+            {item.size && `Size ${item.size}`}
           </p>
         )}
         {isLoading && !imageUrl && (
