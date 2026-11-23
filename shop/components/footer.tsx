@@ -24,8 +24,8 @@ export default function Footer({ categories }: FooterProps) {
 
           {/* Brand */}
           <div className="flex flex-col gap-3">
-            <Link href="/" className="font-serif text-xl font-bold tracking-tight">
-              MAYA<span className="text-muted-foreground font-light">STORE</span>
+            <Link href="/" className="font-[family-name:var(--font-tenor-sans)] text-xl font-bold tracking-tight">
+              MAISON
             </Link>
             <p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
               Votre destination pour le streetwear et la mode de qualité. Des pièces choisies, un style intemporel.
