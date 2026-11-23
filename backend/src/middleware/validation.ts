@@ -1,6 +1,19 @@
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import type { ZodSchema } from "zod";
+import {
+  clothingSizes,
+  hexColorSchema,
+  productColorSchema,
+  stockEntrySchema,
+  refineVariants,
+  productQuerySchema,
+  productStockQuerySchema,
+} from "../schema/product.schema.js";
+import {
+  orderQuerySchema,
+  updateOrderInformationSchema,
+} from "../schema/order.schema.js";
 
 // ─────────────────────────────────────────────────────────────
 // REUSABLE HELPER SCHEMAS
@@ -34,29 +47,43 @@ const moneySchema = z
       )
   );
 
-// Clothing sizes that exist in the database enum.
-const clothingSizes = ["34", "36", "38", "40", "42", "44", "46", "48"] as const;
+// NOTE: `clothingSizes` and the hex-colour schema now live in
+// schema/product.schema.ts (single source of truth) and are imported above.
+// `hexColorSchema` accepts "FF0000", "ff0000" or "#FF0000" and always outputs
+// bare uppercase ("FF0000"), which is exactly how the DB stores it.
 
-// A valid 6-digit hex colour WITHOUT the leading "#" (case-insensitive input;
-// the service normalises to uppercase before persisting).
-const colorHexSchema = z
-  .string()
-  .trim()
-  .regex(
-    /^[0-9A-Fa-f]{6}$/,
-    "colorHex must be exactly 6 hex digits without the '#' prefix (e.g. 'FF0000')"
-  );
-
-// Admin permission values that exist in the database enum.
+// CHANGED: Admin permission values. Must match the `admin_permission` DB enum
+// exactly (schema.ts → adminPermission), otherwise admins created through the
+// API would get permissions that authorize("order_read") etc. never match.
 const adminPermissions = [
-  "product_management",
-  "order_management",
-  "coupon_management",
-  "shipping_management",
+  "product_read",
+  "product_delete",
+  "product_add",
+  "product_update",
+  "category_read",
+  "category_delete",
+  "category_add",
+  "category_update",
   "commune_read",
   "commune_delete",
   "commune_add",
   "commune_update",
+  "order_read",
+  "order_delete",
+  "order_add",
+  "order_update",
+  "coupon_read",
+  "coupon_delete",
+  "coupon_add",
+  "coupon_update",
+  "shipping_read",
+  "shipping_delete",
+  "shipping_add",
+  "shipping_update",
+  "shipping_company_read",
+  "shipping_company_delete",
+  "shipping_company_add",
+  "shipping_company_update",
   "wilaya_read",
   "wilaya_delete",
   "wilaya_add",
@@ -103,6 +130,28 @@ export const validate =
 
     // Replace body with the cleaned / transformed data.
     req.body = result.data;
+    next();
+  };
+
+// ─────────────────────────────────────────────────────────────
+// GENERIC QUERY-STRING VALIDATOR FACTORY
+// Same idea as validate() but reads req.query and stores the parsed result
+// in res.locals[localsKey] so the controller can read a typed object.
+// ─────────────────────────────────────────────────────────────
+const validateQuery =
+  (schema: ZodSchema, localsKey: string) =>
+  (req: Request, res: Response, next: NextFunction): void => {
+    const result = schema.safeParse(req.query);
+
+    if (!result.success) {
+      const errors = result.error.issues.map(
+        (e: z.ZodIssue) => `${e.path.join(".")}: ${e.message}`
+      );
+      res.status(400).json({ success: false, errors });
+      return;
+    }
+
+    res.locals[localsKey] = result.data;
     next();
   };
 
@@ -167,9 +216,9 @@ export const validateWilayaCode =
 // ███  ADMIN VALIDATORS
 // ═════════════════════════════════════════════════════════════
 
-// Schema for creating a new admin account.
-// All fields are required.
-const createAdminSchema = z.object({
+// Fields WITHOUT defaults. Defaults are added only for "create" below,
+// so that "update" (a .partial()) never injects values the caller did not send.
+const adminFieldsSchema = z.object({
   // Username must be at least 3 characters, no spaces allowed.
   username: z
     .string()
@@ -188,14 +237,20 @@ const createAdminSchema = z.object({
   phoneNumber: phoneNumberSchema,
 
   // Permissions is an array; each item must be a known permission value.
-  permissions: z.array(z.enum(adminPermissions)).default([]),
+  permissions: z.array(z.enum(adminPermissions)),
 
-  // Type defaults to "regular_admin" if not provided.
+  // Admin type.
+  type: z.enum(adminTypes),
+});
+
+// Schema for creating a new admin account.
+const createAdminSchema = adminFieldsSchema.extend({
+  permissions: z.array(z.enum(adminPermissions)).default([]),
   type: z.enum(adminTypes).default("regular_admin"),
 });
 
-// Schema for updating an existing admin (all fields optional).
-const updateAdminSchema = createAdminSchema.partial();
+// Schema for updating an existing admin (all fields optional, NO defaults).
+const updateAdminSchema = adminFieldsSchema.partial();
 
 // Schema for admin login.
 const adminLoginSchema = z.object({
@@ -223,7 +278,6 @@ export const validateCategory = validate(categorySchema);
 // ███  PRODUCT VALIDATORS
 // ═════════════════════════════════════════════════════════════
 
-// Schema for creating a new product.
 const productImageUploadSchema = z.object({
   publicId: z.string().min(1, "publicId is required"),
   version: z
@@ -235,19 +289,30 @@ const productImageUploadSchema = z.object({
   replaceImage: z.string().trim().min(1).optional(),
 });
 
-const createProductSchema = z.object({
-  title: z.string().trim().min(1, "Title is required"),
+// Reusable list schemas (no defaults here).
+const sizesSchema = z
+  .array(z.enum(clothingSizes))
+  .max(clothingSizes.length, "Too many sizes")
+  .refine((s) => new Set(s).size === s.length, "Duplicate sizes are not allowed");
 
+const colorsSchema = z
+  .array(productColorSchema)
+  .max(20, "At most 20 colors are allowed per product");
+
+const stockEntriesSchema = z
+  .array(stockEntrySchema)
+  .max(200, "At most 200 stock entries are allowed per product");
+
+// Base shape WITHOUT defaults and WITHOUT refinements.
+//  - no defaults    → .partial() for update can never inject "[]" and wipe data
+//  - no refinements → Zod v4 refuses to .extend() / .partial() refined schemas,
+//                     so superRefine is applied last, on the final schema.
+const productBaseSchema = z.object({
+  title: z.string().trim().min(1, "Title is required"),
   description: z.string().trim().min(1, "Description is required"),
 
   // Price must be a non-negative monetary value.
   price: moneySchema,
-
-  // Colors is a list of strings (e.g. ["red", "blue"]). Can be empty.
-  colors: z.array(z.string().trim().min(1)).default([]),
-
-  // Sizes must be valid clothing sizes from the enum.
-  sizes: z.array(z.enum(clothingSizes)).default([]),
 
   // Promo is optional. When provided it must be <= price (the DB also checks this).
   promo: moneySchema.optional(),
@@ -258,50 +323,55 @@ const createProductSchema = z.object({
     .int("Category ID must be a whole number")
     .positive("Category ID must be positive"),
 
-  // Optional Cloudinary upload confirmations.
-  // Each entry is verified server-side before the product is inserted.
+  // Sizes must be valid clothing sizes from the enum.
+  sizes: sizesSchema,
+
+  // Colors are { name, hex } pairs stored in the product_colors table.
+  // hex is the identity (normalised to bare uppercase), name is only a label.
+  colors: colorsSchema,
+
+  // Stock entries: one per (colorHex, size) pair. Every colorHex must exist in
+  // `colors` and every size in `sizes` (checked by refineVariants + the service).
+  stockEntries: stockEntriesSchema,
+
+  // Optional Cloudinary upload confirmations (create: no replaceImage).
   imageUploads: z
     .array(productImageUploadSchema.omit({ replaceImage: true }))
-    .min(0)
     .max(8, "At most 8 images are allowed per product")
-    .optional(),
-
-  // Stock entries: each defines the available units for a (colorHex, size) pair.
-  // colorHex is 6 hex digits without "#" (e.g. "FF0000").
-  stockEntries: z
-    .array(
-      z.object({
-        colorHex: colorHexSchema,
-        size: z.enum(clothingSizes, {
-          error: `Size must be one of: ${clothingSizes.join(", ")}`,
-        }),
-        stock: z
-          .number()
-          .int("Stock must be a whole number")
-          .min(0, "Stock must be a non-negative number"),
-      })
-    )
     .optional(),
 });
 
-// Schema for updating a product.
-// All fields are optional (patch semantics).
+// CREATE: defaults make every list present, so the cross-checks always run.
+const createProductSchema = productBaseSchema
+  .extend({
+    sizes: sizesSchema.default([]),
+    colors: colorsSchema.default([]),
+    stockEntries: stockEntriesSchema.default([]),
+  })
+  .superRefine(refineVariants);
+
+// UPDATE (patch semantics): NO defaults.
+//   undefined → "leave untouched"
+//   []        → "remove all"
 // `promo` can additionally be null to explicitly clear an existing promo price.
 // When `stockEntries` is provided, it replaces the entire stock grid atomically.
-const updateProductSchema = createProductSchema.partial().extend({
-  promo: z.union([moneySchema, z.null()]).optional(),
-  imageUploads: z
-    .array(productImageUploadSchema)
-    .max(8, "At most 8 images are allowed per product")
-    .optional(),
-  imageRemovals: z
-    .array(z.string().trim().min(1, "Image URL is required"))
-    .max(8, "At most 8 images can be removed at once")
-    .refine((images) => new Set(images).size === images.length, {
-      message: "An image can only be removed once",
-    })
-    .optional(),
-});
+const updateProductSchema = productBaseSchema
+  .partial()
+  .extend({
+    promo: z.union([moneySchema, z.null()]).optional(),
+    imageUploads: z
+      .array(productImageUploadSchema)
+      .max(8, "At most 8 images are allowed per product")
+      .optional(),
+    imageRemovals: z
+      .array(z.string().trim().min(1, "Image URL is required"))
+      .max(8, "At most 8 images can be removed at once")
+      .refine((images) => new Set(images).size === images.length, {
+        message: "An image can only be removed once",
+      })
+      .optional(),
+  })
+  .superRefine(refineVariants);
 
 export const validateCreateProduct = validate(createProductSchema);
 export const validateUpdateProduct = validate(updateProductSchema);
@@ -314,9 +384,7 @@ const createShippingCompanySchema = z.object({
   name: z.string().trim().min(1, "Shipping company name is required"),
 
   // The raw API key before hashing – at least 16 characters for security.
-  apiKey: z
-    .string()
-    .min(16, "API key must be at least 16 characters"),
+  apiKey: z.string().min(16, "API key must be at least 16 characters"),
 });
 
 const updateShippingCompanySchema = createShippingCompanySchema.partial();
@@ -396,7 +464,8 @@ export const validateUpdateShippingPrice = validate(updateShippingPriceSchema);
 // ███  COUPON VALIDATORS
 // ═════════════════════════════════════════════════════════════
 
-const createCouponSchema = z.object({
+// Fields WITHOUT defaults (see the admin section for why).
+const couponFieldsSchema = z.object({
   // Coupon code: uppercase letters and digits only, 4–20 characters.
   code: z
     .string()
@@ -426,11 +495,15 @@ const createCouponSchema = z.object({
     .min(1, "discountPercentage must be at least 1")
     .max(100, "discountPercentage must be at most 100"),
 
-  // Status defaults to "active" when not provided.
+  status: z.enum(couponStatuses),
+});
+
+// Status defaults to "active" on create only.
+const createCouponSchema = couponFieldsSchema.extend({
   status: z.enum(couponStatuses).default("active"),
 });
 
-const updateCouponSchema = createCouponSchema.partial();
+const updateCouponSchema = couponFieldsSchema.partial();
 
 export const validateCreateCoupon = validate(createCouponSchema);
 export const validateUpdateCoupon = validate(updateCouponSchema);
@@ -440,8 +513,8 @@ export const validateUpdateCoupon = validate(updateCouponSchema);
 // ═════════════════════════════════════════════════════════════
 
 // Each item inside an order's products array must match this shape.
-// The client sends only the selection fields; the server resolves title & price
-// from live product rows — this prevents price-manipulation attacks.
+// The client sends only the selection fields; the server resolves title, price
+// and the colour NAME from live product rows — this prevents manipulation.
 const orderProductSchema = z.object({
   // The ID of the product as it exists in the products table.
   productId: z
@@ -455,14 +528,25 @@ const orderProductSchema = z.object({
     .int("Quantity must be a whole number")
     .min(1, "Quantity must be at least 1"),
 
-  // Color and size are optional – not every product has them.
-  color: z.string().trim().min(1).optional(),
   /**
-   * Hex code of the chosen color variant (6 hex digits, no "#").
-   * Required alongside `color` when the product has stock tracking entries.
+   * Hex of the chosen colour variant. Accepts "FF0000" or "#FF0000",
+   * normalised to bare uppercase. This is the colour's identity: the order
+   * service checks it against product_colors for this product, reads the
+   * colour name from there, and uses it for the stock look-up.
+   * Required by the service when the product has colours.
    */
-  colorHex: colorHexSchema.optional(),
-  size: z.string().trim().min(1).optional(),
+  colorHex: hexColorSchema.optional(),
+
+  /**
+   * CHANGED (deprecated): the service ignores this value and always uses
+   * product_colors.name (matched by hex). Kept optional so existing clients
+   * that still send it do not break.
+   */
+  color: z.string().trim().min(1).max(50).optional(),
+
+  // Same enum as products and product_stock, so stock look-ups can never miss.
+  // Required by the service when the product has sizes.
+  size: z.enum(clothingSizes).optional(),
 });
 
 // Schema for placing a new order.
@@ -511,66 +595,28 @@ const updateOrderStatusSchema = z.object({
 
 export const validateCreateOrder = validate(createOrderSchema);
 export const validateUpdateOrderStatus = validate(updateOrderStatusSchema);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ORDER QUERY VALIDATOR
-// Validates pagination, filters, search, and sorting query-string params
-// for GET /api/orders.  Reads from req.query (not req.body).
-// ─────────────────────────────────────────────────────────────────────────────
-import {
-  orderQuerySchema,
-  updateOrderInformationSchema,
-} from "../schema/order.schema.js";
-import { productQuerySchema } from "../schema/product.schema.js";
-
 export const validateUpdateOrderInformation = validate(
   updateOrderInformationSchema
 );
 
-export const validateOrderQuery = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void => {
-  const result = orderQuerySchema.safeParse(req.query);
-
-  if (!result.success) {
-    const errors = result.error.issues.map(
-      (e: z.ZodIssue) => `${e.path.join(".")}: ${e.message}`
-    );
-    res.status(400).json({ success: false, errors });
-    return;
-  }
-
-  // Attach the parsed/typed query to res.locals so the controller can read it.
-  res.locals.orderQuery = result.data;
-  next();
-};
-
 // ─────────────────────────────────────────────────────────────────────────────
-// PRODUCT QUERY VALIDATOR
-// Validates pagination, filters, search, and sorting query-string params
-// for GET /api/products.  Reads from req.query (not req.body).
+// QUERY-STRING VALIDATORS (read req.query, store the parsed result in res.locals)
 // ─────────────────────────────────────────────────────────────────────────────
-export const validateProductQuery = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void => {
-  const result = productQuerySchema.safeParse(req.query);
 
-  if (!result.success) {
-    const errors = result.error.issues.map(
-      (e: z.ZodIssue) => `${e.path.join(".")}: ${e.message}`
-    );
-    res.status(400).json({ success: false, errors });
-    return;
-  }
+// GET /api/orders → res.locals.orderQuery
+export const validateOrderQuery = validateQuery(orderQuerySchema, "orderQuery");
 
-  // Attach the parsed/typed query to res.locals so the controller can read it.
-  res.locals.productQuery = result.data;
-  next();
-};
+// GET /api/products → res.locals.productQuery
+export const validateProductQuery = validateQuery(
+  productQuerySchema,
+  "productQuery"
+);
+
+// GET /api/products/:id/stock → res.locals.productStockQuery
+export const validateProductStockQuery = validateQuery(
+  productStockQuerySchema,
+  "productStockQuery"
+);
 
 // ═════════════════════════════════════════════════════════════
 // ███  IMAGE UPLOAD VALIDATORS
@@ -612,4 +658,3 @@ const requestUploadTokensSchema = z.object({
 });
 
 export const validateRequestUploadTokens = validate(requestUploadTokensSchema);
-
