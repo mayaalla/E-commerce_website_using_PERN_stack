@@ -29,8 +29,8 @@ export function NavMobileMenu({ categories }: NavMobileMenuProps) {
       </SheetTrigger>
       <SheetContent side="left" className="w-72">
         <div className="flex flex-col gap-1 mt-8">
-          <Link href="/" className="font-serif text-lg font-bold mb-6 block">
-            MAYA<span className="text-muted-foreground font-light">STORE</span>
+          <Link href="/" className="font-[family-name:var(--font-tenor-sans)] text-lg font-bold mb-6 block">
+            MAISON
           </Link>
           {categories.map((cat) => (
             <Link
