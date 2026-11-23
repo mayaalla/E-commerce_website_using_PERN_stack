@@ -11,6 +11,7 @@ import {
   text,
   time,
   unique,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 
 
@@ -104,6 +105,8 @@ export const categories = pgTable("categories", {
   deletedAt: date("deleted_at"), // Soft delete timestamp, null if not deleted
 });
 
+
+
 export const products = pgTable(
   "products",
   {
@@ -112,7 +115,6 @@ export const products = pgTable(
     description: text("description").notNull(),
     price: numeric("price", { precision: 12, scale: 2 }).notNull(),
     images: text("images").array().notNull().default([]),
-    colors: text("colors").array().notNull().default([]),
     sizes: clothingSize("sizes").array().notNull().default([]),
     // Optional discounted price, in the same currency as price.
     promo: numeric("promo", { precision: 12, scale: 2 }),
@@ -127,6 +129,26 @@ export const products = pgTable(
       "products_promo_valid",
       sql`${table.promo} IS NULL OR (${table.promo} >= 0 AND ${table.promo} <= ${table.price})`,
     ),
+  ],
+);
+
+// Stores each product color as one name + hex pair. The hex is the stable
+// identity used by product_stock; names are labels and only unique per product.
+export const productColors = pgTable(
+  "product_colors",
+  {
+    id: serial("id").primaryKey(),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id),
+    name: text("name").notNull(),
+    hex: text("hex").notNull(),
+  },
+  (table) => [
+    unique("product_colors_product_hex_unique").on(table.productId, table.hex),
+    unique("product_colors_product_name_unique").on(table.productId, table.name),
+    check("product_colors_name_not_empty", sql`length(trim(${table.name})) > 0`),
+    check("product_colors_hex_format", sql`${table.hex} ~ '^[0-9A-F]{6}$'`),
   ],
 );
 
@@ -215,19 +237,14 @@ export const productStock = pgTable(
     stock: integer("stock").notNull().default(0),
   },
   (table) => [
-    // Each (product, color, size) pair must be unique so we can safely upsert.
-    unique("product_stock_product_color_size_unique").on(
-      table.productId,
-      table.colorHex,
-      table.size,
-    ),
-    // stock must never go negative.
+ unique("product_stock_product_color_size_unique").on(table.productId, table.colorHex, table.size),
     check("product_stock_non_negative", sql`${table.stock} >= 0`),
-    // colorHex must be exactly 6 uppercase hex digits (no leading "#").
-    check(
-      "product_stock_color_hex_format",
-      sql`${table.colorHex} ~ '^[0-9A-Fa-f]{6}$'`,
-    ),
+    check("product_stock_color_hex_format", sql`${table.colorHex} ~ '^[0-9A-F]{6}$'`),
+    foreignKey({
+      name: "product_stock_color_fk",
+      columns: [table.productId, table.colorHex],
+      foreignColumns: [productColors.productId, productColors.hex],
+    }).onDelete("cascade"),
   ],
 );
 
