@@ -19,8 +19,8 @@ function DialogPortal({ ...props }: DialogPrimitive.Portal.Props) {
   return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />
 }
 
-function DialogFermer({ ...props }: DialogPrimitive.Fermer.Props) {
-  return <DialogPrimitive.Fermer data-slot="dialog-close" {...props} />
+function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
+  return <DialogPrimitive.Close data-slot="dialog-close" {...props} />
 }
 
 function DialogOverlay({
@@ -42,10 +42,10 @@ function DialogOverlay({
 function DialogContent({
   className,
   children,
-  showFermerButton = true,
+  showCloseButton = true,
   ...props
 }: DialogPrimitive.Popup.Props & {
-  showFermerButton?: boolean
+  showCloseButton?: boolean
 }) {
   return (
     <DialogPortal>
@@ -59,8 +59,8 @@ function DialogContent({
         {...props}
       >
         {children}
-        {showFermerButton && (
-          <DialogPrimitive.Fermer
+        {showCloseButton && (
+          <DialogPrimitive.Close
             data-slot="dialog-close"
             render={
               <Button
@@ -72,8 +72,8 @@ function DialogContent({
           >
             <XIcon
             />
-            <span className="sr-only">Fermer</span>
-          </DialogPrimitive.Fermer>
+            <span className="sr-only">Close</span>
+          </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>
     </DialogPortal>
@@ -92,11 +92,11 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
 
 function DialogFooter({
   className,
-  showFermerButton = false,
+  showCloseButton = false,
   children,
   ...props
 }: React.ComponentProps<"div"> & {
-  showFermerButton?: boolean
+  showCloseButton?: boolean
 }) {
   return (
     <div
@@ -108,10 +108,10 @@ function DialogFooter({
       {...props}
     >
       {children}
-      {showFermerButton && (
-        <DialogPrimitive.Fermer render={<Button variant="outline" />}>
-          Fermer
-        </DialogPrimitive.Fermer>
+      {showCloseButton && (
+        <DialogPrimitive.Close render={<Button variant="outline" />}>
+          Close
+        </DialogPrimitive.Close>
       )}
     </div>
   )
@@ -148,7 +148,7 @@ function DialogDescription({
 
 export {
   Dialog,
-  DialogFermer,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
