@@ -1,0 +1,42 @@
+name: ecommerce
+
+services:
+  api:
+    image: ghcr.io/mayaalla/e-commerce_website_using_pern_stack/api:latest
+    env_file: ./backend/.env
+    environment:
+      PORT: 5000
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  shop:
+    image: ghcr.io/mayaalla/e-commerce_website_using_pern_stack/shop:latest
+    environment:
+      API_INTERNAL_URL: http://api:5000
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  admin:
+    image: ghcr.io/mayaalla/e-commerce_website_using_pern_stack/admin:latest
+    ports:
+      - "5174:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  migrate:
+    image: ghcr.io/mayaalla/e-commerce_website_using_pern_stack/migrate:latest
+    env_file: ./backend/.env
+    profiles: ["tools"]
