@@ -1,11 +1,15 @@
 import { apiClient } from "@/lib/api-client";
 import type { CreateProductRequest, CreateProductResponse } from "../types";
+import { createProductRequestSchema, productResponseSchema } from "../schemas";
 import { AxiosError } from "axios";
 
 const addProduct = async (data: CreateProductRequest): Promise<CreateProductResponse> => {
+    const payload = createProductRequestSchema.parse(data);
+    let responseData: unknown;
+
     try {
-        const response = await apiClient.post<CreateProductResponse>("/products", data);
-        return response.data;
+        const response = await apiClient.post<unknown>("/products", payload);
+        responseData = response.data;
     } catch (error) {
         if (error instanceof AxiosError) {
             if (error.response) {
@@ -22,6 +26,8 @@ const addProduct = async (data: CreateProductRequest): Promise<CreateProductResp
             throw new Error("An unexpected error occurred while adding the product.");
         }
     }
+
+    return productResponseSchema.parse(responseData);
 };
 
 export default addProduct;
