@@ -8,15 +8,18 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ProductCard } from "@/components/product-card";
 import { categoriesApi, productsApi, type Product } from "@/lib/api";
+import { connection } from "next/server";
+
 
 export const metadata: Metadata = {
-  title: "MayaStore | Vêtements du quotidien",
-  description: "Découvrez la collection de vêtements MayaStore.",
+  title: "MAISON | Vêtements du quotidien",
+  description: "Découvrez la collection de vêtements MAISON.",
 };
 
 const featuredProductLimit = 8;
 
 async function FeaturedProducts() {
+   await connection();     
   let products: Product[];
   let categories: Awaited<ReturnType<typeof categoriesApi.getAll>> = [];
 

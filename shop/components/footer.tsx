@@ -74,7 +74,7 @@ export default function Footer({ categories }: FooterProps) {
         <Separator className="my-8" />
 
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
-          <p>&copy; {year} MayaStore. Tous droits réservés.</p>
+          <p>&copy; {year} MAISON. Tous droits réservés.</p>
           <p>Fait avec amour</p>
         </div>
       </div>

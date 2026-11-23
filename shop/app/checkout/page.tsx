@@ -16,8 +16,8 @@ import {
 } from "@/lib/api";
 
 export const metadata: Metadata = {
-  title: "Commande avec paiement à la livraison | MayaStore",
-  description: "Commandez chez MayaStore et payez à la livraison.",
+  title: "Commande avec paiement à la livraison | MAISON",
+  description: "Commandez chez MAISON et payez à la livraison.",
 };
 
 type CheckoutPageProps = {

@@ -6,3 +6,4 @@ TODO
 .aws/
 .codex/.agents/
 skills-lock.json
+.agents/

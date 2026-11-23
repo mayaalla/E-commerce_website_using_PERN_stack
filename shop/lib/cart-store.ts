@@ -14,7 +14,7 @@ export type CartLineInput = Omit<CartLine, "key" | "quantity"> & {
   quantity?: number;
 };
 
-const storageKey = "mayastore.cart.v1";
+const storageKey = "MAISON.cart.v1";
 const emptyCart: CartLine[] = [];
 const listeners = new Set<() => void>();
 let cartSnapshot = emptyCart;

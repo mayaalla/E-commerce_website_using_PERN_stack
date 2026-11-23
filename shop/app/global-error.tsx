@@ -19,7 +19,7 @@ export default function GlobalError({
       <body className="min-h-screen bg-background text-foreground antialiased">
         <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col justify-center px-6 py-16">
           <p className="text-sm font-medium uppercase tracking-widest text-muted-foreground">
-            MayaStore
+            MAISON
           </p>
           <h1 className="mt-4 text-3xl font-medium tracking-tight sm:text-4xl">
             Impossible d’ouvrir la boutique

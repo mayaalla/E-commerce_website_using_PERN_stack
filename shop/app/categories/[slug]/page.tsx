@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: CategoryPageProps): Promise<M
   const normalizedSlug = slug.toLowerCase();
 
   if (!isValidSlug(normalizedSlug)) {
-    return { title: "Catégorie introuvable | MayaStore" };
+    return { title: "Catégorie introuvable | MAISON" };
   }
 
   try {
@@ -26,12 +26,12 @@ export async function generateMetadata({ params }: CategoryPageProps): Promise<M
 
     return category
       ? {
-          title: `${category.name} | MayaStore`,
-          description: `Découvrez ${category.name} chez MayaStore.`,
+          title: `${category.name} | MAISON`,
+          description: `Découvrez ${category.name} chez MAISON.`,
         }
-      : { title: "Catégorie introuvable | MayaStore" };
+      : { title: "Catégorie introuvable | MAISON" };
   } catch {
-    return { title: "Catégorie | MayaStore" };
+    return { title: "Catégorie | MAISON" };
   }
 }
 
@@ -88,7 +88,7 @@ async function CategoryHeader({ params }: CategoryPageProps) {
         {category.name}
       </h1>
       <p className="mt-3 max-w-prose text-sm leading-6 text-muted-foreground sm:text-base sm:leading-7">
-        Découvrez la collection {category.name} chez MayaStore.
+        Découvrez la collection {category.name} chez MAISON.
       </p>
     </header>
   );

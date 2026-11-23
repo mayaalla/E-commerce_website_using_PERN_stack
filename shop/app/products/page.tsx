@@ -7,10 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { categoriesApi, type Category } from "@/lib/api";
 import { getStorefrontProducts } from "@/lib/storefront-products";
-
+import { connection } from "next/server";
 export const metadata: Metadata = {
-  title: "Tous les produits | MayaStore",
-  description: "Parcourez, recherchez et filtrez la collection MayaStore.",
+  title: "Tous les produits | MAISON",
+  description: "Parcourez, recherchez et filtrez la collection MAISON.",
 };
 
 /**
@@ -29,6 +29,7 @@ export default function ProductsPage() {
 
 /** Fetches products + categories in parallel then hands off to the client catalog. */
 async function ProductsContent() {
+   await connection();  
   const [productsResult, categoriesResult] = await Promise.all([
     getStorefrontProducts().then(
       (products) => ({ ok: true as const, products }),

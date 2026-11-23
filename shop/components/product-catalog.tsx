@@ -790,7 +790,7 @@ function PageHeader() {
         Tous les produits
       </h1>
       <p className="mt-3 max-w-prose text-sm leading-6 text-muted-foreground sm:text-base sm:leading-7">
-        Parcourez toute la collection MayaStore et trouvez la pièce qui vous convient.
+        Parcourez toute la collection MAISON et trouvez la pièce qui vous convient.
       </p>
     </header>
   );

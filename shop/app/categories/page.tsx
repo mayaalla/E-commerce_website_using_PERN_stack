@@ -6,8 +6,8 @@ import { categoriesApi } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export const metadata: Metadata = {
-  title: "Catégories | MayaStore",
-  description: "Découvrez toutes les catégories de produits MayaStore.",
+  title: "Catégories | MAISON",
+  description: "Découvrez toutes les catégories de produits MAISON.",
 };
 
 /**

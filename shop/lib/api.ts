@@ -1,5 +1,5 @@
 /**
- * Centralized API client for MayaStore.
+ * Centralized API client for MAISON.
  *
  * All requests go through this single module so that:
  *  - The base URL is configured in one place (.env.local)
@@ -8,7 +8,11 @@
  *  - Errors are normalized into a typed ApiError class
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000";
+const BASE_URL = (
+  typeof window === "undefined"
+    ? process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL // server: Docker network, else fall back
+    : process.env.NEXT_PUBLIC_API_URL                                  // browser: public URL
+) as string;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -31,7 +35,6 @@ type RequestOptions = Omit<RequestInit, "body"> & {
 // ─────────────────────────────────────────────────────────────────────────────
 // Core fetch wrapper
 // ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Base request function.
  * - Automatically sets Content-Type: application/json when a body is provided.
