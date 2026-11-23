@@ -1,11 +1,14 @@
 import { apiClient } from "@/lib/api-client";
-import { GetProductResponse } from "../types";
+import type { GetProductResponse } from "../types";
+import { productResponseSchema } from "../schemas";
 import { AxiosError } from "axios";
 
 const getProduct = async (id: number): Promise<GetProductResponse> => {
+    let responseData: unknown;
+
     try {
-        const response = await apiClient.get<GetProductResponse>(`/products/${id}`);
-        return response.data;
+        const response = await apiClient.get<unknown>(`/products/${id}`);
+        responseData = response.data;
     } catch (error) {
         if (error instanceof AxiosError) {
             if (error.response) {
@@ -22,6 +25,8 @@ const getProduct = async (id: number): Promise<GetProductResponse> => {
             throw new Error("An unexpected error occurred while fetching the product.");
         }
     }
+
+    return productResponseSchema.parse(responseData);
 };
 
 export default getProduct;
