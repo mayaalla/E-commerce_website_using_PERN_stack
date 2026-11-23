@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/popover";
 import { Label } from "@/components/ui/label";
 
-import { useGetProducts } from "@/features/products";
+import { useGetProducts } from "../hooks/useGetProducts";
 import { useGetCategories } from "@/features/categories";
 import AddProductWindow from "./AddProductWindow";
 import ProductTable from "./ProductTable";
