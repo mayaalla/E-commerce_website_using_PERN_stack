@@ -23,7 +23,8 @@ import {
 } from "@/components/ui/dialog";
 
 import { useAddOrder } from "@/features/orders";
-import { useGetProducts } from "@/features/products";
+import { createOrderRequestSchema } from "@/features/orders/schemas";
+import { useGetProductStock, useGetProducts } from "@/features/products";
 import { useGetShippingCompanies } from "@/features/shippings";
 import { useGetCommunesByWilaya } from "@/features/communes/hooks/useGetCommunesByWilaya";
 import { useGetWilayas } from "@/features/wilaya";
@@ -31,8 +32,9 @@ import { useGetWilayas } from "@/features/wilaya";
 // ─── constants ────────────────────────────────────────────────────────────────
 const PHONE_RE = /^0\d{9}$/;
 const WILAYA_RE = /^\d{2}$/;
+const PRODUCT_PICKER_QUERY = { limit: 100 };
 
-const EMPTY_ITEM = { productId: "", quantity: 1, color: "", size: "" };
+const EMPTY_ITEM = { productId: "", quantity: 1, colorHex: "", size: "" };
 const EMPTY_FORM = {
   name: "",
   phoneNumber: "",
@@ -47,16 +49,61 @@ const EMPTY_FORM = {
 // Isolated row so each item can derive its available colors/sizes from the
 // selected product without re-rendering siblings.
 // ─────────────────────────────────────────────────────────────────────────────
-function ProductItemRow({ item, index, errors, allProducts, onChangeItem, onRemove, canRemove }) {
+function ProductItemRow({ item, index, errors, allProducts, items, onChangeItem, onRemove, canRemove }) {
   // Resolve the full product object for the selected productId
   const selectedProduct = allProducts.find((p) => String(p.id) === String(item.productId)) ?? null;
   const availableColors = selectedProduct?.colors ?? [];
   const availableSizes = selectedProduct?.sizes ?? [];
+  const hasStockGrid = availableColors.length > 0 && availableSizes.length > 0;
+  const {
+    data: stockData,
+    isLoading: stockLoading,
+    isFetching: stockFetching,
+    isError: stockError,
+    error: stockQueryError,
+  } = useGetProductStock(selectedProduct?.id ?? 0, hasStockGrid);
+  const stockRows = stockData?.data ?? [];
+  const stockByVariant = React.useMemo(
+    () => new Map(stockRows.map((entry) => [`${entry.colorHex}:${entry.size}`, entry.stock])),
+    [stockRows],
+  );
+  const isStockPending = hasStockGrid && (stockLoading || stockFetching);
+  const hasLoadedStock = hasStockGrid && !isStockPending && !stockError;
+
+  function getStock(size) {
+    return stockByVariant.get(`${item.colorHex}:${size}`) ?? 0;
+  }
+
+  const selectedStock =
+    hasLoadedStock && item.colorHex && item.size ? getStock(item.size) : undefined;
+  const quantityAlreadyInOtherRows = items.reduce((total, otherItem, otherIndex) => {
+    if (
+      otherIndex === index ||
+      String(otherItem.productId) !== String(item.productId) ||
+      otherItem.colorHex !== item.colorHex ||
+      otherItem.size !== item.size
+    ) {
+      return total;
+    }
+    const quantity = Number(otherItem.quantity);
+    return total + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0);
+  }, 0);
+  const availableForThisRow =
+    selectedStock === undefined
+      ? undefined
+      : Math.max(0, selectedStock - quantityAlreadyInOtherRows);
+  const quantityExceedsStock =
+    availableForThisRow !== undefined && Number(item.quantity) > availableForThisRow;
 
   function handleProductChange(val) {
     // Reset color & size when product changes so stale values are cleared
     onChangeItem(index, "productId", val);
-    onChangeItem(index, "color", "");
+    onChangeItem(index, "colorHex", "");
+    onChangeItem(index, "size", "");
+  }
+
+  function handleColorChange(colorHex) {
+    onChangeItem(index, "colorHex", colorHex);
     onChangeItem(index, "size", "");
   }
 
@@ -123,11 +170,30 @@ function ProductItemRow({ item, index, errors, allProducts, onChangeItem, onRemo
             min={1}
             value={item.quantity}
             onChange={(e) => onChangeItem(index, "quantity", e.target.value)}
-            aria-invalid={!!errors[`products[${index}].quantity`]}
+            max={availableForThisRow}
+            aria-invalid={!!errors[`products[${index}].quantity`] || quantityExceedsStock}
           />
           {errors[`products[${index}].quantity`] && (
             <p className="text-xs text-destructive">
               {errors[`products[${index}].quantity`]}
+            </p>
+          )}
+          {isStockPending && (
+            <p role="status" className="text-xs text-muted-foreground">Loading stock…</p>
+          )}
+          {hasStockGrid && stockError && (
+            <p role="alert" className="text-xs text-destructive">
+              {stockQueryError?.message ?? "Stock availability could not be loaded."}
+            </p>
+          )}
+          {selectedStock !== undefined && (
+            <p
+              role={quantityExceedsStock ? "alert" : undefined}
+              className={quantityExceedsStock ? "text-xs text-destructive" : "text-xs text-muted-foreground"}
+            >
+              {quantityExceedsStock
+                ? `Only ${availableForThisRow} available for this variant.`
+                : `${availableForThisRow} available`}
             </p>
           )}
         </div>
@@ -137,30 +203,37 @@ function ProductItemRow({ item, index, errors, allProducts, onChangeItem, onRemo
           <Label className="text-xs">Color</Label>
           {availableColors.length > 0 ? (
             <Select
-              value={item.color}
-              onValueChange={(val) => onChangeItem(index, "color", val)}
+              value={item.colorHex}
+              onValueChange={handleColorChange}
               disabled={!selectedProduct}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select color…" />
               </SelectTrigger>
               <SelectContent>
-                {availableColors.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
+                {availableColors.map((color) => (
+                  <SelectItem key={color.hex} value={color.hex}>
+                    <span className="flex items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="size-3 shrink-0 rounded-full border border-border"
+                        style={{ backgroundColor: `#${color.hex}` }}
+                      />
+                      <span>{color.name}</span>
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           ) : (
-            <Input
-              id={`o-color-${index}`}
-              placeholder={selectedProduct ? "No colors" : "Pick a product first"}
-              value={item.color}
-              disabled={!selectedProduct || availableColors.length === 0}
-              onChange={(e) => onChangeItem(index, "color", e.target.value)}
-              className="disabled:cursor-not-allowed"
-            />
+            <p className="flex h-9 items-center text-xs text-muted-foreground">
+              {selectedProduct ? "No color variants" : "Pick a product first"}
+            </p>
+          )}
+          {errors[`products[${index}].colorHex`] && (
+            <p role="alert" className="text-xs text-destructive">
+              {errors[`products[${index}].colorHex`]}
+            </p>
           )}
         </div>
 
@@ -171,28 +244,44 @@ function ProductItemRow({ item, index, errors, allProducts, onChangeItem, onRemo
             <Select
               value={item.size}
               onValueChange={(val) => onChangeItem(index, "size", val)}
-              disabled={!selectedProduct}
+              disabled={
+                !selectedProduct ||
+                (availableColors.length > 0 && !item.colorHex) ||
+                isStockPending
+              }
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select size…" />
+                <SelectValue placeholder={isStockPending ? "Loading stock…" : "Select size…"} />
               </SelectTrigger>
               <SelectContent>
-                {availableSizes.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
+                {availableSizes.map((size) => {
+                  const stock = hasLoadedStock && item.colorHex ? getStock(size) : undefined;
+                  return (
+                  <SelectItem
+                    key={size}
+                    value={size}
+                    disabled={stock !== undefined && stock === 0}
+                  >
+                    <span className="flex w-full items-center justify-between gap-3">
+                      <span>{size}</span>
+                      {stock !== undefined && (
+                        <span className="text-xs text-muted-foreground">{stock} in stock</span>
+                      )}
+                    </span>
                   </SelectItem>
-                ))}
+                  );
+                })}
               </SelectContent>
             </Select>
           ) : (
-            <Input
-              id={`o-size-${index}`}
-              placeholder={selectedProduct ? "No sizes" : "Pick a product first"}
-              value={item.size}
-              disabled={!selectedProduct || availableSizes.length === 0}
-              onChange={(e) => onChangeItem(index, "size", e.target.value)}
-              className="disabled:cursor-not-allowed"
-            />
+            <p className="flex h-9 items-center text-xs text-muted-foreground">
+              {selectedProduct ? "No size variants" : "Pick a product first"}
+            </p>
+          )}
+          {errors[`products[${index}].size`] && (
+            <p role="alert" className="text-xs text-destructive">
+              {errors[`products[${index}].size`]}
+            </p>
           )}
         </div>
       </div>
@@ -212,7 +301,7 @@ function AddOrderWindow() {
   const { mutate, isPending } = useAddOrder();
 
   // ── remote data ────────────────────────────────────────────────────────────
-  const { data: productsData, isLoading: productsLoading } = useGetProducts();
+  const { data: productsData, isLoading: productsLoading } = useGetProducts(PRODUCT_PICKER_QUERY);
   const { data: companiesData, isLoading: companiesLoading } = useGetShippingCompanies();
   const { data: wilayasData, isLoading: wilayasLoading } = useGetWilayas();
 
@@ -292,6 +381,22 @@ function AddOrderWindow() {
       if (!item.quantity || !Number.isInteger(qty) || qty <= 0) {
         next[`products[${i}].quantity`] = "Quantity must be at least 1.";
       }
+
+      const selectedProduct = allProducts.find(
+        (product) => String(product.id) === String(item.productId),
+      );
+      if (item.productId && !selectedProduct) {
+        next[`products[${i}].productId`] = "This product is no longer available.";
+      }
+      if (selectedProduct?.colors.length) {
+        const matchingColor = selectedProduct.colors.some((color) => color.hex === item.colorHex);
+        if (!matchingColor) {
+          next[`products[${i}].colorHex`] = "Please select a product color.";
+        }
+      }
+      if (selectedProduct?.sizes.length && !selectedProduct.sizes.includes(item.size)) {
+        next[`products[${i}].size`] = "Please select a product size.";
+      }
     });
 
     setErrors(next);
@@ -312,20 +417,31 @@ function AddOrderWindow() {
       products: form.products.map((item) => ({
         productId: Number(item.productId),
         quantity: Number(item.quantity),
-        ...(item.color.trim() && { color: item.color.trim() }),
+        ...(item.colorHex && { colorHex: item.colorHex }),
         ...(item.size.trim() && { size: item.size.trim() }),
       })),
       ...(form.couponCode.trim() && { couponCode: form.couponCode.trim().toUpperCase() }),
     };
 
-    mutate(payload, {
+    const parsedPayload = createOrderRequestSchema.safeParse(payload);
+    if (!parsedPayload.success) {
+      setErrors({
+        _server: parsedPayload.error.issues.map((issue) => issue.message).join(" "),
+      });
+      return;
+    }
+
+    mutate(parsedPayload.data, {
       onSuccess: () => {
         setForm(EMPTY_FORM);
         setErrors({});
         setOpen(false);
       },
       onError: (err) => {
-        setErrors({ _server: err?.message ?? "Failed to place order." });
+        const fieldErrors = Object.values(err?.fieldErrors ?? {}).filter(Boolean);
+        setErrors({
+          _server: fieldErrors.join(" ") || err?.message || "Failed to place order.",
+        });
       },
     });
   }
@@ -358,7 +474,7 @@ function AddOrderWindow() {
           <form onSubmit={handleSubmit} className="space-y-5 py-2">
             {/* Server error */}
             {errors._server && (
-              <p className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                 {errors._server}
               </p>
             )}
@@ -541,6 +657,7 @@ function AddOrderWindow() {
                     item={item}
                     errors={errors}
                     allProducts={allProducts}
+                    items={form.products}
                     onChangeItem={setItem}
                     onRemove={removeItem}
                     canRemove={form.products.length > 1}
