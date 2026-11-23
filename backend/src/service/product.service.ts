@@ -1,19 +1,66 @@
-import { eq, isNull, and, ilike, gte, lte, isNotNull, asc, desc, or, sql } from "drizzle-orm";
+import {
+  eq,
+  isNull,
+  and,
+  ilike,
+  gte,
+  lte,
+  isNotNull,
+  asc,
+  desc,
+  or,
+  sql,
+  inArray,
+  getTableColumns,
+} from "drizzle-orm";
 import type { ProductQuery } from "../schema/product.schema.js";
 
 import { db } from "../db/db.js";
-import { products, categories, productStock } from "../db/schema.js";
+import { products, categories, productStock, productColors } from "../db/schema.js";
 import { verifyAndConsumeToken, MAX_IMAGES_PER_PRODUCT } from "../utils/upload.js";
+
+
+/** Service-layer error carrying the HTTP status expected by the error handler. */
+class AppError extends Error {
+  constructor(
+    public readonly statusCode: number,
+    message: string
+  ) {
+    super(message);
+    this.name = "AppError";
+  }
+}
+
+export const normalizeHex = (v: string) => v.trim().replace(/^#/, "").toUpperCase();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** A single product row as stored in the database. */
+/** A single product row as stored in the database (no colors: they live in product_colors). */
 export type Product = typeof products.$inferSelect;
 
 /** A single product_stock row as stored in the database. */
 export type ProductStock = typeof productStock.$inferSelect;
+
+/** One color of a product. `hex` is the identity (6 uppercase digits, no "#"), `name` is a label. */
+export type ProductColor = Pick<typeof productColors.$inferSelect, "name" | "hex">;
+
+/** A product together with its colors. */
+export type ProductWithColors = Product & { colors: ProductColor[] };
+
+/** A product together with its colors and its full stock grid. */
+export type ProductDetail = ProductWithColors & { stock: ProductStock[] };
+
+/** A stock row enriched with the color name, so the UI needs no second call. */
+export type ProductStockWithColor = {
+  id: number;
+  productId: number;
+  colorHex: string;
+  colorName: string;
+  size: ProductStock["size"];
+  stock: number;
+};
 
 /**
  * One entry in the stock array: which colour + size and how many units.
@@ -21,7 +68,7 @@ export type ProductStock = typeof productStock.$inferSelect;
  */
 export type StockEntry = {
   colorHex: string;
-  size: (typeof productStock.$inferSelect)["size"];
+  size: ProductStock["size"];
   stock: number;
 };
 
@@ -43,8 +90,9 @@ export type CreateProductPayload = {
   description: string;
   /** Decimal string – must be >= 0. */
   price: string;
-  colors?: string[];
-  sizes?: (typeof products.$inferSelect)["sizes"];
+  /** Colors of the product. Every stock entry must reference one of these hex values. */
+  colors?: ProductColor[];
+  sizes?: Product["sizes"];
   /** Optional promotional price; must be >= 0 and <= price. */
   promo?: string;
   categoryId: number;
@@ -56,18 +104,20 @@ export type CreateProductPayload = {
    * — preventing cross-admin token theft/reuse attacks.
    */
   adminId: number;
-  /**
-   * Optional initial stock entries.
-   * Each entry defines the stock level for a specific (colorHex, size) pair.
-   */
+  /** Optional initial stock entries, one per (colorHex, size) pair. */
   stockEntries?: StockEntry[];
 };
 
-/** Payload accepted when updating an existing product.
- *  Every field is optional so callers can do partial updates. */
+/**
+ * Payload accepted when updating an existing product (patch semantics).
+ *   undefined → leave untouched
+ *   colors: [] / stockEntries: [] → remove all
+ *   promo: null → clear the promo price
+ */
 export type UpdateProductPayload = Partial<
-  Omit<CreateProductPayload, "adminId" | "imageUploads">
+  Omit<CreateProductPayload, "adminId" | "imageUploads" | "promo">
 > & {
+  promo?: string | null;
   adminId: number;
   imageUploads?: ImageUploadConfirmation[];
   imageRemovals?: string[];
@@ -75,22 +125,35 @@ export type UpdateProductPayload = Partial<
 
 /** Paginated list response for products. */
 export type PaginatedProducts = {
-  data: Product[];
+  data: ProductWithColors[];
   total: number;
   page: number;
   limit: number;
   totalPages: number;
 };
 
+/** Anything that can run a SELECT: the db itself or a transaction. */
+type Executor = Pick<typeof db, "select">;
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
+// Helpers: normalisation
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Zod already normalises hex values, but the service must not trust its caller.
+const normalizeColors = (colors: ProductColor[]): ProductColor[] =>
+  colors.map((c) => ({ name: c.name.trim(), hex: normalizeHex(c.hex) }));
+
+const normalizeStock = (entries: StockEntry[]): StockEntry[] =>
+  entries.map((e) => ({ ...e, colorHex: normalizeHex(e.colorHex) }));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers: business rules
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Verifies that the referenced category exists AND has not been soft-deleted
- * before we insert or update a product.  This gives a clear error message
- * instead of a raw FK violation, and prevents products being filed under a
- * deleted category.
+ * Verifies that the referenced category exists AND has not been soft-deleted.
+ * Gives a clear error instead of a raw FK violation.
  */
 async function assertCategoryExists(categoryId: number): Promise<void> {
   const [category] = await db
@@ -100,7 +163,7 @@ async function assertCategoryExists(categoryId: number): Promise<void> {
     .limit(1);
 
   if (!category || category.deletedAt) {
-    throw new Error(`Category with id ${categoryId} not found`);
+    throw new AppError(404, `Category with id ${categoryId} not found`);
   }
 }
 
@@ -111,30 +174,232 @@ async function assertCategoryExists(categoryId: number): Promise<void> {
  */
 function assertPromoValid(price: string, promo: string): void {
   if (parseFloat(promo) > parseFloat(price)) {
-    throw new Error("Promo price must be less than or equal to the regular price");
+    throw new AppError(422, "Promo price must be less than or equal to the regular price");
+  }
+}
+
+/**
+ * THE core invariant: a stock row may only exist for a color and a size that
+ * the product actually declares, and each (color, size) pair appears once.
+ * The composite FK enforces it in the DB; checking here gives a clear 422.
+ */
+function assertStockMatchesVariants(
+  entries: { colorHex: string; size: string }[],
+  colors: ProductColor[],
+  sizes: readonly string[]
+): void {
+  const hexes = new Set(colors.map((c) => c.hex));
+  const sizeSet = new Set(sizes);
+  const seen = new Set<string>();
+
+  for (const e of entries) {
+    if (!hexes.has(e.colorHex)) {
+      throw new AppError(
+        422,
+        `Stock references color ${e.colorHex}, which is not defined on this product`
+      );
+    }
+    if (!sizeSet.has(e.size)) {
+      throw new AppError(
+        422,
+        `Stock references size ${e.size}, which is not defined on this product`
+      );
+    }
+    const key = `${e.colorHex}|${e.size}`;
+    if (seen.has(key)) {
+      throw new AppError(422, `Duplicate stock entry for ${key}`);
+    }
+    seen.add(key);
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helpers: colors
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Loads the colors of several products with ONE query (no N+1). */
+async function fetchColorsByProduct(
+  executor: Executor,
+  productIds: number[]
+): Promise<Map<number, ProductColor[]>> {
+  const byProduct = new Map<number, ProductColor[]>();
+  if (productIds.length === 0) return byProduct;
+
+  const rows = await executor
+    .select({
+      productId: productColors.productId,
+      name: productColors.name,
+      hex: productColors.hex,
+    })
+    .from(productColors)
+    .where(inArray(productColors.productId, productIds))
+    .orderBy(asc(productColors.id));
+
+  for (const { productId, ...color } of rows) {
+    const list = byProduct.get(productId);
+    if (list) list.push(color);
+    else byProduct.set(productId, [color]);
+  }
+  return byProduct;
+}
+
+/** Adds a `colors` array to every row. */
+async function attachColors<T extends { id: number }>(
+  rows: T[],
+  executor: Executor = db
+): Promise<Array<T & { colors: ProductColor[] }>> {
+  const byProduct = await fetchColorsByProduct(
+    executor,
+    rows.map((r) => r.id)
+  );
+  return rows.map((r) => ({ ...r, colors: byProduct.get(r.id) ?? [] }));
+}
+
+/**
+ * Makes product_colors match `desired`, keyed on hex (the identity).
+ * Order: delete → rename → insert, so a name freed by a deletion can be reused.
+ * A diff is used instead of "delete all + insert all" because product_stock
+ * points at the hex: replacing everything would cascade-delete the stock of
+ * colors that did not change.
+ */
+async function syncProductColors(
+  tx: Tx,
+  productId: number,
+  desired: ProductColor[]
+): Promise<boolean> {
+  const current = await tx
+    .select()
+    .from(productColors)
+    .where(eq(productColors.productId, productId));
+
+  const currentByHex = new Map(current.map((c) => [c.hex, c]));
+  const desiredHexes = new Set(desired.map((c) => c.hex));
+
+  const toDelete = current.filter((c) => !desiredHexes.has(c.hex));
+  const toRename = desired.filter((c) => {
+    const found = currentByHex.get(c.hex);
+    return found !== undefined && found.name !== c.name;
+  });
+  const toInsert = desired.filter((c) => !currentByHex.has(c.hex));
+
+  if (toDelete.length > 0) {
+    await tx
+      .delete(productColors)
+      .where(inArray(productColors.id, toDelete.map((c) => c.id)));
+  }
+  for (const c of toRename) {
+    await tx
+      .update(productColors)
+      .set({ name: c.name })
+      .where(and(eq(productColors.productId, productId), eq(productColors.hex, c.hex)));
+  }
+  if (toInsert.length > 0) {
+    await tx
+      .insert(productColors)
+      .values(toInsert.map((c) => ({ productId, name: c.name, hex: c.hex })));
+  }
+
+  return toDelete.length + toRename.length + toInsert.length > 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers: images and comparisons
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Validates removals / replacements / final count against the CURRENT image list. */
+function assertImageOpsValid(
+  currentImages: string[],
+  removals: string[],
+  uploads: ImageUploadConfirmation[]
+): void {
+  const removalSet = new Set(removals);
+  if (removalSet.size !== removals.length) {
+    throw new AppError(422, "Image update failed: an image can only be removed once");
+  }
+
+  const targets = uploads
+    .map((u) => u.replaceImage)
+    .filter((image): image is string => image !== undefined);
+  if (new Set(targets).size !== targets.length) {
+    throw new AppError(422, "Image update failed: an image can only be replaced once");
+  }
+
+  if (removals.some((image) => !currentImages.includes(image))) {
+    throw new AppError(
+      422,
+      "Image update failed: a removed image does not belong to this product"
+    );
+  }
+  if (targets.some((image) => !currentImages.includes(image) || removalSet.has(image))) {
+    throw new AppError(
+      422,
+      "Image update failed: a replacement image does not belong to this product"
+    );
+  }
+
+  const finalCount =
+    currentImages.length -
+    removalSet.size +
+    uploads.filter((u) => u.replaceImage === undefined).length;
+  if (finalCount > MAX_IMAGES_PER_PRODUCT) {
+    throw new AppError(
+      422,
+      `Too many images: a product may have at most ${MAX_IMAGES_PER_PRODUCT} images`
+    );
+  }
+}
+
+/** Applies removals, then replacements in place, then appends new images. */
+function applyImageOps(
+  currentImages: string[],
+  removals: string[],
+  uploads: ImageUploadConfirmation[],
+  uploadedUrls: string[]
+): string[] {
+  const removalSet = new Set(removals);
+  const result = currentImages.filter((image) => !removalSet.has(image));
+
+  uploads.forEach((upload, index) => {
+    if (upload.replaceImage) {
+      result[result.indexOf(upload.replaceImage)] = uploadedUrls[index];
+    } else {
+      result.push(uploadedUrls[index]);
+    }
+  });
+  return result;
+}
+
+/** Field-aware equality: numeric strings by value, arrays by content. */
+function sameValue(key: string, a: unknown, b: unknown): boolean {
+  if (key === "price" || key === "promo") {
+    return a == null || b == null ? a === b : Number(a) === Number(b);
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  return a === b;
+}
+
+/** True when both stock grids contain exactly the same (color, size, stock) rows. */
+function sameStock(current: StockEntry[], next: StockEntry[]): boolean {
+  if (current.length !== next.length) return false;
+  const currentMap = new Map(current.map((e) => [`${e.colorHex}|${e.size}`, e.stock]));
+  return next.every((e) => currentMap.get(`${e.colorHex}|${e.size}`) === e.stock);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Create
-// Validate business rules, insert the product, return the new record.
+// Validate business rules, verify uploads, then insert product → colors → stock
+// in ONE transaction (colors must come before stock because of the FK).
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function createProductService(
   payload: CreateProductPayload
-): Promise<Product & { stock: ProductStock[] }> {
-  const {
-    title,
-    description,
-    price,
-    colors = [],
-    sizes = [],
-    promo,
-    categoryId,
-    imageUploads,
-    adminId,
-    stockEntries = [],
-  } = payload;
+): Promise<ProductDetail> {
+  const { title, description, price, sizes = [], promo, categoryId, imageUploads, adminId } =
+    payload;
+  const colors = normalizeColors(payload.colors ?? []);
+  const stockEntries = normalizeStock(payload.stockEntries ?? []);
 
   await assertCategoryExists(categoryId);
 
@@ -142,9 +407,13 @@ export async function createProductService(
     assertPromoValid(price, promo);
   }
 
+  // Fail fast, BEFORE any upload token is consumed.
+  assertStockMatchesVariants(stockEntries, colors, sizes);
+
   // Guard: never store more than MAX_IMAGES_PER_PRODUCT URLs on a product.
   if (imageUploads && imageUploads.length > MAX_IMAGES_PER_PRODUCT) {
-    throw new Error(
+    throw new AppError(
+      422,
       `Too many images: a product may have at most ${MAX_IMAGES_PER_PRODUCT} images`
     );
   }
@@ -159,7 +428,6 @@ export async function createProductService(
     );
   }
 
-  // Insert product + stock entries atomically.
   return db.transaction(async (tx) => {
     const [newProduct] = await tx
       .insert(products)
@@ -167,13 +435,18 @@ export async function createProductService(
         title,
         description,
         price,
-        colors,
         sizes,
         promo: promo ?? null,
         categoryId,
         images,
       })
       .returning();
+
+    if (colors.length > 0) {
+      await tx
+        .insert(productColors)
+        .values(colors.map((c) => ({ productId: newProduct.id, name: c.name, hex: c.hex })));
+    }
 
     let stock: ProductStock[] = [];
     if (stockEntries.length > 0) {
@@ -182,7 +455,7 @@ export async function createProductService(
         .values(
           stockEntries.map((e) => ({
             productId: newProduct.id,
-            colorHex: e.colorHex.toUpperCase(),
+            colorHex: e.colorHex,
             size: e.size,
             stock: e.stock,
           }))
@@ -190,16 +463,15 @@ export async function createProductService(
         .returning();
     }
 
-    return { ...newProduct, stock };
+    return { ...newProduct, colors, stock };
   });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Read one
-// Fetch a single product by primary key.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function getProductByIdService(id: number): Promise<Product> {
+export async function getProductByIdService(id: number): Promise<ProductWithColors> {
   const [product] = await db
     .select()
     .from(products)
@@ -207,10 +479,11 @@ export async function getProductByIdService(id: number): Promise<Product> {
     .limit(1);
 
   if (!product || product.deletedAt) {
-    throw new Error(`Product with id ${id} not found`);
+    throw new AppError(404, `Product with id ${id} not found`);
   }
 
-  return product;
+  const [withColors] = await attachColors([product]);
+  return withColors;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,11 +497,12 @@ export async function getProductByIdService(id: number): Promise<Product> {
  *  - search      : ILIKE match on title OR description
  *  - categoryId  : exact match on categoryId
  *  - size        : product must include this clothing size in its sizes array
- *  - color       : product must include a color that ILIKE-matches this string
+ *  - color       : product must have a color whose NAME ILIKE-matches (product_colors.name)
+ *  - colorHex    : product must have a color with exactly this HEX (product_colors.hex)
  *  - priceMin    : price >= priceMin
  *  - priceMax    : price <= priceMax
  *  - hasPromo    : true → only products with a promo; false → only without
- *  - sortBy      : column to order by (id | title | price | promo | categoryId)
+ *  - sortBy      : id | title | price | promo | categoryId
  *  - sortOrder   : asc | desc
  *  - page / limit: pagination
  */
@@ -242,6 +516,7 @@ export async function getAllProductsService(
     categoryId,
     size,
     color,
+    colorHex,
     priceMin,
     priceMax,
     hasPromo,
@@ -253,7 +528,6 @@ export async function getAllProductsService(
   const conditions = [isNull(products.deletedAt)];
 
   if (search) {
-    // Match the term against title OR description (case-insensitive).
     conditions.push(
       or(
         ilike(products.title, `%${search}%`),
@@ -272,13 +546,21 @@ export async function getAllProductsService(
   }
 
   if (color) {
-    // The colors column is a text array; check if any element ILIKE the query.
-    conditions.push(
-      sql`EXISTS (
-        SELECT 1 FROM unnest(${products.colors}) AS c
-        WHERE c ILIKE ${"%" + color + "%"}
-      )`
-    );
+    // Colors now live in product_colors: correlated EXISTS on the NAME.
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM ${productColors}
+      WHERE ${productColors.productId} = ${products.id}
+        AND ${productColors.name} ILIKE ${"%" + color + "%"}
+    )`);
+  }
+
+  if (colorHex) {
+    // Exact match on the HEX (already normalised to bare uppercase by zod).
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM ${productColors}
+      WHERE ${productColors.productId} = ${products.id}
+        AND ${productColors.hex} = ${colorHex}
+    )`);
   }
 
   if (priceMin !== undefined) {
@@ -319,8 +601,8 @@ export async function getAllProductsService(
   const totalPages = Math.ceil(total / limit);
   const offset = (page - 1) * limit;
 
-  // ── Fetch the page ─────────────────────────────────────────────────────────
-  const data = await db
+  // ── Fetch the page, then attach colors with ONE extra query ────────────────
+  const rows = await db
     .select()
     .from(products)
     .where(whereClause)
@@ -328,32 +610,22 @@ export async function getAllProductsService(
     .limit(limit)
     .offset(offset);
 
+  const data = await attachColors(rows);
+
   return { data, total, page, limit, totalPages };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Read by category
-// Return all products that belong to a given category id.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getProductsByCategoryService(
   categoryId: number
-): Promise<Product[]> {
+): Promise<ProductWithColors[]> {
   await assertCategoryExists(categoryId);
 
-  return db
-    .select({
-      id: products.id,
-      title: products.title,
-      description: products.description,
-      price: products.price,
-      images: products.images,
-      colors: products.colors,
-      sizes: products.sizes,
-      promo: products.promo,
-      categoryId: products.categoryId,
-      deletedAt: products.deletedAt,
-    })
+  const rows = await db
+    .select(getTableColumns(products))
     .from(products)
     .innerJoin(categories, eq(products.categoryId, categories.id))
     // Return only non-deleted products whose category is also not deleted.
@@ -361,21 +633,33 @@ export async function getProductsByCategoryService(
       and(
         isNull(products.deletedAt),
         eq(products.categoryId, categoryId),
-        isNull(categories.deletedAt),
+        isNull(categories.deletedAt)
       )
     );
+
+  return attachColors(rows);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Update
-// Verify the product exists; re-validate business rules that may be affected
-// by the patch; apply it; return the updated record.
+// Update (patch semantics)
+//  1. validate everything that can fail BEFORE consuming upload tokens
+//  2. verify/consume tokens
+//  3. in one transaction: lock row → sync colors → update product → replace stock
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function updateProductByIdService(
   id: number,
   payload: UpdateProductPayload
-): Promise<Product & { stock: ProductStock[] }> {
+): Promise<ProductDetail> {
+  const {
+    colors: rawColors,
+    stockEntries: rawStock,
+    adminId,
+    imageUploads: _imageUploads,
+    imageRemovals: _imageRemovals,
+    ...productFields
+  } = payload;
+
   const [existing] = await db
     .select()
     .from(products)
@@ -383,236 +667,145 @@ export async function updateProductByIdService(
     .limit(1);
 
   if (!existing || existing.deletedAt) {
-    throw new Error(`Product with id ${id} not found`);
+    throw new AppError(404, `Product with id ${id} not found`);
   }
 
-  // Only validate the category when the caller is actually changing it
-  // to a *different* category. Keeping the same categoryId is always
-  // allowed – even if that category has since been soft-deleted – so
-  // that existing products are not locked out of edits unrelated to
-  // their category.
-  if (
-    payload.categoryId !== undefined &&
-    payload.categoryId !== existing.categoryId
-  ) {
+  // Only validate the category when it is actually changing. Keeping the same
+  // categoryId is always allowed, even if that category was soft-deleted since.
+  if (payload.categoryId !== undefined && payload.categoryId !== existing.categoryId) {
     await assertCategoryExists(payload.categoryId);
   }
 
-  // Re-validate promo using the effective price after the patch.
+  // Re-validate promo against the effective price after the patch.
+  // payload.promo === null means "clear it", so there is nothing to validate.
   const effectivePrice = payload.price ?? existing.price;
-  const effectivePromo =
-    "promo" in payload ? payload.promo : existing.promo ?? undefined;
-
-  if (effectivePromo !== undefined && effectivePromo !== null) {
+  const effectivePromo = payload.promo === undefined ? existing.promo : payload.promo;
+  if (effectivePromo !== null) {
     assertPromoValid(effectivePrice, effectivePromo);
   }
 
+  // ── Variants: validate the state AFTER the patch ──────────────────────────
+  const colors = rawColors === undefined ? undefined : normalizeColors(rawColors);
+  const stockEntries = rawStock === undefined ? undefined : normalizeStock(rawStock);
+
+  if (colors !== undefined || payload.sizes !== undefined || stockEntries !== undefined) {
+    const nextColors =
+      colors ?? (await fetchColorsByProduct(db, [id])).get(id) ?? [];
+    const nextSizes = payload.sizes ?? existing.sizes;
+    const nextStock =
+      stockEntries ??
+      (await db
+        .select({ colorHex: productStock.colorHex, size: productStock.size })
+        .from(productStock)
+        .where(eq(productStock.productId, id)));
+
+    // Removing a color/size that still has stock (and not sending a new
+    // stockEntries) is rejected here instead of silently deleting stock.
+    assertStockMatchesVariants(nextStock, nextColors, nextSizes);
+  }
+
+  // ── Images: validate against the current list ─────────────────────────────
   const imageUploads = payload.imageUploads ?? [];
   const imageRemovals = payload.imageRemovals ?? [];
-  const removalSet = new Set(imageRemovals);
-  const replacementTargets = imageUploads
-    .map(({ replaceImage }) => replaceImage)
-    .filter((image): image is string => image !== undefined);
-  const replacementSet = new Set(replacementTargets);
   const hasImageChanges =
     payload.imageUploads !== undefined || payload.imageRemovals !== undefined;
 
-  if (removalSet.size !== imageRemovals.length) {
-    throw new Error("Image update failed: an image can only be removed once");
-  }
-  if (replacementSet.size !== replacementTargets.length) {
-    throw new Error("Image update failed: an image can only be replaced once");
-  }
-  if (imageRemovals.some((image) => !existing.images.includes(image))) {
-    throw new Error(
-      "Image update failed: a removed image does not belong to this product"
-    );
-  }
-  if (replacementTargets.some(
-    (image) => !existing.images.includes(image) || removalSet.has(image)
-  )) {
-    throw new Error(
-      "Image update failed: a replacement image does not belong to this product"
-    );
-  }
-  const finalImageCount =
-    existing.images.length - removalSet.size +
-    imageUploads.filter(({ replaceImage }) => replaceImage === undefined).length;
-  if (finalImageCount > MAX_IMAGES_PER_PRODUCT) {
-    throw new Error(
-      `Too many images: a product may have at most ${MAX_IMAGES_PER_PRODUCT} images`
-    );
-  }
+  assertImageOpsValid(existing.images, imageRemovals, imageUploads);
 
   // Verify and consume each new upload token before storing its Cloudinary URL.
   const uploadedImageUrls = await Promise.all(
     imageUploads.map(({ publicId, version, signature }) =>
-      verifyAndConsumeToken(publicId, version, signature, payload.adminId)
+      verifyAndConsumeToken(publicId, version, signature, adminId)
     )
   );
 
   return db.transaction(async (tx) => {
-    // Build the product SET clause (exclude non-product update fields).
-    const {
-      stockEntries,
-      adminId,
-      imageUploads: _imageUploads,
-      imageRemovals: _imageRemovals,
-      ...productFields
-    } = payload;
-    const updates: Partial<typeof products.$inferInsert> = { ...productFields };
+    // Lock the row for the whole update: concurrent edits queue up instead of
+    // overwriting each other with a stale image list or stale colors.
+    const [current] = await tx
+      .select()
+      .from(products)
+      .where(and(eq(products.id, id), isNull(products.deletedAt)))
+      .for("update")
+      .limit(1);
+
+    if (!current) {
+      throw new AppError(404, `Product with id ${id} not found`);
+    }
+
+    // ── 1. Colors ───────────────────────────────────────────────────────────
+    let colorsChanged = false;
+    if (colors !== undefined) {
+      colorsChanged = await syncProductColors(tx, id, colors);
+    }
+
+    // ── 2. Product columns ──────────────────────────────────────────────────
+    // Drop undefined keys so "not sent" is never mistaken for "set to undefined".
+    const updates = Object.fromEntries(
+      Object.entries(productFields).filter(([, value]) => value !== undefined)
+    ) as Partial<typeof products.$inferInsert>;
+    // `promo: null` stays in `updates` on purpose: it clears the promo price.
 
     if (hasImageChanges) {
-      // Lock the row while applying image operations so concurrent image edits
-      // cannot overwrite one another using the same stale image list.
-      const [currentProduct] = await tx
-        .select({ images: products.images })
-        .from(products)
-        .where(and(eq(products.id, id), isNull(products.deletedAt)))
-        .for("update")
-        .limit(1);
-
-      if (!currentProduct) {
-        throw new Error(`Product with id ${id} not found`);
-      }
-
-      const currentImages = [...currentProduct.images];
-      if (imageRemovals.some((image) => !currentImages.includes(image))) {
-        throw new Error(
-          "Image update failed: a removed image does not belong to this product"
-        );
-      }
-      if (replacementTargets.some(
-        (image) => !currentImages.includes(image) || removalSet.has(image)
-      )) {
-        throw new Error(
-          "Image update failed: a replacement image does not belong to this product"
-        );
-      }
-
-      const finalImages = currentImages.filter((image) => !removalSet.has(image));
-      uploadedImageUrls.forEach((imageUrl, index) => {
-        const replaceImage = imageUploads[index].replaceImage;
-        if (replaceImage) {
-          const replaceIndex = finalImages.indexOf(replaceImage);
-          if (replaceIndex < 0) {
-            throw new Error(
-              "Image update failed: a replacement image does not belong to this product"
-            );
-          }
-          finalImages[replaceIndex] = imageUrl;
-        } else {
-          finalImages.push(imageUrl);
-        }
-      });
-
-      if (finalImages.length > MAX_IMAGES_PER_PRODUCT) {
-        throw new Error(
-          `Too many images: a product may have at most ${MAX_IMAGES_PER_PRODUCT} images`
-        );
-      }
-
-      updates.images = finalImages;
-    }
-
-    if ("promo" in payload) {
-      // Only nullify promo if the caller explicitly passes null/undefined AND
-      // the existing product had no promo to begin with. If the product already
-      // has a promo and the caller omits/nulls it without intent, preserve the
-      // existing value.
-      if (payload.promo !== undefined && payload.promo !== null) {
-        updates.promo = payload.promo;
-      } else if (existing.promo !== null) {
-        // Caller did not supply a promo value but the product already has one —
-        // keep the existing promo instead of wiping it.
-        delete updates.promo;
-      } else {
-        // Product had no promo and caller is explicitly clearing it — keep null.
-        updates.promo = null;
-      }
-    }
-
-    // ── Skip the UPDATE if no product fields actually changed ────────────────
-    const { images: updatesImages, ...scalarUpdates } = updates;
-    const scalarKeys = Object.keys(scalarUpdates) as Array<keyof typeof scalarUpdates>;
-    const scalarChanged = scalarKeys.some(
-      (key) => (scalarUpdates as Record<string, unknown>)[key] !== (existing as Record<string, unknown>)[key]
-    );
-    const imagesChanged =
-      updatesImages !== undefined &&
-      JSON.stringify(updatesImages) !== JSON.stringify(existing.images);
-    const productFieldsChanged = scalarChanged || imagesChanged;
-
-    // ── Skip stock update if the entries are identical ───────────────────────
-    const stockChanged = await (async () => {
-      if (stockEntries === undefined) return false;
-      const currentStock = await tx
-        .select()
-        .from(productStock)
-        .where(eq(productStock.productId, id));
-
-      if (currentStock.length !== stockEntries.length) return true;
-
-      const normalize = (arr: Array<{ colorHex: string; size: string; stock: number }>) =>
-        [...arr]
-          .sort((a, b) => `${a.colorHex}|${a.size}`.localeCompare(`${b.colorHex}|${b.size}`))
-          .map((e) => ({ colorHex: e.colorHex.toUpperCase(), size: e.size, stock: e.stock }));
-
-      return (
-        JSON.stringify(normalize(currentStock)) !==
-        JSON.stringify(normalize(stockEntries.map((e) => ({ ...e, colorHex: e.colorHex.toUpperCase() }))))
+      // Re-validate against the LOCKED image list, then apply.
+      assertImageOpsValid(current.images, imageRemovals, imageUploads);
+      updates.images = applyImageOps(
+        current.images,
+        imageRemovals,
+        imageUploads,
+        uploadedImageUrls
       );
-    })();
-
-    // If truly nothing changed, return the existing product + stock unchanged.
-    if (!productFieldsChanged && !stockChanged) {
-      const unchangedStock = await tx
-        .select()
-        .from(productStock)
-        .where(eq(productStock.productId, id));
-      return { ...existing, stock: unchangedStock };
     }
 
-    const [updated] = productFieldsChanged
-      ? await tx.update(products).set(updates).where(eq(products.id, id)).returning()
-      : [existing];
+    const productFieldsChanged = Object.entries(updates).some(
+      ([key, value]) =>
+        !sameValue(key, value, (current as Record<string, unknown>)[key])
+    );
 
-    // If stockEntries is provided and actually changed, replace the stock grid atomically.
-    let stock: ProductStock[] = [];
-    if (stockEntries !== undefined && stockChanged) {
+    const updated = productFieldsChanged
+      ? (await tx.update(products).set(updates).where(eq(products.id, id)).returning())[0]
+      : current;
+
+    // ── 3. Stock (read AFTER the color sync so the comparison is accurate) ──
+    // Deleting a color cascades to its stock rows, so those are already gone here.
+    const currentStock = await tx
+      .select()
+      .from(productStock)
+      .where(eq(productStock.productId, id));
+
+    let stock: ProductStock[] = currentStock;
+    if (stockEntries !== undefined && !sameStock(currentStock, stockEntries)) {
       await tx.delete(productStock).where(eq(productStock.productId, id));
-
-      if (stockEntries.length > 0) {
-        stock = await tx
-          .insert(productStock)
-          .values(
-            stockEntries.map((e) => ({
-              productId: id,
-              colorHex: e.colorHex.toUpperCase(),
-              size: e.size,
-              stock: e.stock,
-            }))
-          )
-          .returning();
-      }
-    } else {
-      // Return the existing stock unchanged.
-      stock = await tx
-        .select()
-        .from(productStock)
-        .where(eq(productStock.productId, id));
+      stock =
+        stockEntries.length > 0
+          ? await tx
+              .insert(productStock)
+              .values(
+                stockEntries.map((e) => ({
+                  productId: id,
+                  colorHex: e.colorHex,
+                  size: e.size,
+                  stock: e.stock,
+                }))
+              )
+              .returning()
+          : [];
     }
 
-    return { ...updated, stock };
+    // ── 4. Build the response from what is really in the DB ─────────────────
+    const finalColors = colorsChanged
+      ? ((await fetchColorsByProduct(tx, [id])).get(id) ?? [])
+      : ((await fetchColorsByProduct(tx, [id])).get(id) ?? []);
+
+    return { ...updated, colors: finalColors, stock };
   });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Delete
-// Verify the record exists, soft-delete it, and return its last snapshot.
+// Delete (soft)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function deleteProductByIdService(id: number): Promise<Product> {
+export async function deleteProductByIdService(id: number): Promise<ProductWithColors> {
   const [existing] = await db
     .select()
     .from(products)
@@ -620,34 +813,65 @@ export async function deleteProductByIdService(id: number): Promise<Product> {
     .limit(1);
 
   if (!existing || existing.deletedAt) {
-    throw new Error(`Product with id ${id} not found`);
+    throw new AppError(404, `Product with id ${id} not found`);
   }
 
-  await db.update(products)
+  await db
+    .update(products)
     .set({ deletedAt: new Date().toISOString().slice(0, 10) })
     .where(eq(products.id, id));
 
-  return existing;
+  const [withColors] = await attachColors([existing]);
+  return withColors;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Stock of one product (optionally filtered by color hex and/or size)
+// Joins product_colors so the response carries the color NAME.
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function getProductStockService(
-  productId: number, colorHex?: string, size?: string
-): Promise<ProductStock[]> {
+  productId: number,
+  colorHex?: string,
+  size?: string
+): Promise<ProductStockWithColor[]> {
+  // A missing / deleted product must be a 404, not an empty list.
+  const [product] = await db
+    .select({ id: products.id, deletedAt: products.deletedAt })
+    .from(products)
+    .where(eq(products.id, productId))
+    .limit(1);
+
+  if (!product || product.deletedAt) {
+    throw new AppError(404, `Product with id ${productId} not found`);
+  }
 
   const conditions = [eq(productStock.productId, productId)];
 
   if (colorHex) {
-    conditions.push(eq(productStock.colorHex, colorHex.toUpperCase()));
+    // Already normalised to bare uppercase by the validation layer.
+    conditions.push(eq(productStock.colorHex, normalizeHex(colorHex)));
   }
-
   if (size) {
     conditions.push(eq(productStock.size, size as ProductStock["size"]));
   }
 
-  const stock = await db
-    .select()
+  return db
+    .select({
+      id: productStock.id,
+      productId: productStock.productId,
+      colorHex: productStock.colorHex,
+      colorName: productColors.name,
+      size: productStock.size,
+      stock: productStock.stock,
+    })
     .from(productStock)
+    .innerJoin(
+      productColors,
+      and(
+        eq(productColors.productId, productStock.productId),
+        eq(productColors.hex, productStock.colorHex)
+      )
+    )
     .where(and(...conditions));
-  return stock;
 }
