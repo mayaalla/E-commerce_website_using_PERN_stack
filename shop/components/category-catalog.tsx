@@ -101,7 +101,9 @@ function deriveMaxPrice(products: Product[]): number {
 
 function deriveColors(products: Product[]): string[] {
   const set = new Set<string>();
-  products.forEach((p) => p.colors.forEach((c) => set.add(c.toLowerCase())));
+  products.forEach((product) =>
+    product.colors.forEach((color) => set.add(color.name.trim().toLowerCase())),
+  );
   return [...set].sort();
 }
 
@@ -532,7 +534,12 @@ export function CategoryCatalog({ products, categoryName }: CategoryCatalogProps
     const filtered = products.filter((product) => {
       if (
         query &&
-        ![product.title, product.description, ...product.colors, ...product.sizes]
+        ![
+          product.title,
+          product.description,
+          ...product.colors.map((color) => color.name),
+          ...product.sizes,
+        ]
           .join(" ")
           .toLowerCase()
           .includes(query)
@@ -545,7 +552,9 @@ export function CategoryCatalog({ products, categoryName }: CategoryCatalogProps
       if (
         filters.colors.length &&
         !filters.colors.some((c) =>
-          product.colors.map((pc) => pc.toLowerCase()).includes(c),
+          product.colors.some((productColor) =>
+            productColor.name.trim().toLowerCase() === c,
+          ),
         )
       )
         return false;
