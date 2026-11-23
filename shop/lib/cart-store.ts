@@ -7,6 +7,7 @@ export type CartLine = {
   quantity: number;
   size?: string;
   color?: string;
+  colorHex?: string;
 };
 
 export type CartLineInput = Omit<CartLine, "key" | "quantity"> & {
@@ -35,7 +36,8 @@ function isCartLine(value: unknown): value is CartLine {
     Number.isInteger(line.quantity) &&
     (line.quantity ?? 0) > 0 &&
     (line.size === undefined || typeof line.size === "string") &&
-    (line.color === undefined || typeof line.color === "string")
+    (line.color === undefined || typeof line.color === "string") &&
+    (line.colorHex === undefined || typeof line.colorHex === "string")
   );
 }
 
@@ -122,7 +124,11 @@ function saveCart(lines: CartLine[]): boolean {
 }
 
 export function addToCart(input: CartLineInput): boolean {
-  const key = JSON.stringify([input.productId, input.size ?? null, input.color ?? null]);
+  const key = JSON.stringify([
+    input.productId,
+    input.size ?? null,
+    input.colorHex ?? input.color ?? null,
+  ]);
   const addedQuantity =
     Number.isSafeInteger(input.quantity) && (input.quantity ?? 0) > 0
       ? input.quantity!
