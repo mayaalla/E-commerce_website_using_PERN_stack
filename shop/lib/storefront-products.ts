@@ -7,7 +7,7 @@ export async function getStorefrontProducts() {
   cacheLife({ stale: 60, revalidate: 60, expire: 300 });
   cacheTag("products");
 
-  return productsApi.getAll();
+  return productsApi.getAllPages();
 }
 
 export async function getStorefrontProduct(id: number) {
@@ -19,9 +19,5 @@ export async function getStorefrontProduct(id: number) {
 }
 
 export async function getStorefrontProductStock(id: number) {
-  "use cache";
-  cacheLife({ stale: 60, revalidate: 60, expire: 300 });
-  cacheTag(`product-stock-${id}`);
-
   return productsApi.getStock(id);
 }
