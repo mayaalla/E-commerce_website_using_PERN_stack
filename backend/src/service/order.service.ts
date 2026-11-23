@@ -1,10 +1,24 @@
-import { and, eq, desc, asc, inArray, isNull, sql, notInArray, ilike, gte, lte, or } from "drizzle-orm";
+import {
+  and,
+  eq,
+  desc,
+  asc,
+  inArray,
+  isNull,
+  sql,
+  ilike,
+  gte,
+  lte,
+  or,
+} from "drizzle-orm";
 
 import { db } from "../db/db.js";
 import {
   orders,
   products,
   productStock,
+  productColors, // NEW
+  clothingSize, // NEW (enum, used to derive the size type)
   wilayas,
   communes,
   shippingCompanies,
@@ -27,20 +41,26 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 /** A single order row as stored in the database. */
 export type Order = typeof orders.$inferSelect;
 
+/** Size values allowed by the `clothing_size` DB enum. */
+type ClothingSize = (typeof clothingSize.enumValues)[number];
+
 /** Shape of one line-item sent by the client at checkout. */
 export type OrderItemInput = {
   productId: number;
   quantity: number;
-  /** Display color name chosen by the customer (e.g. "Skin", "Red"). Stored in the order snapshot. */
+  /**
+   * @deprecated Ignored. The color name is always resolved server-side from
+   * product_colors using `colorHex`, so the client can never spoof it.
+   */
   color?: string;
   /**
-   * Hex code of the chosen color (6 uppercase hex digits, no "#").
-   * Used to look up the matching product_stock row.
-   * Must be provided alongside `color` when stock tracking is needed.
+   * Identity of the chosen color (6 uppercase hex digits, no "#").
+   * Required when the product has colors. Must exist in product_colors for
+   * this product.
    */
   colorHex?: string;
-  /** Optional size variant chosen by the customer. */
-  size?: string;
+  /** Size variant. Required when the product has sizes. Must be one of them. */
+  size?: ClothingSize;
 };
 
 /**
@@ -126,31 +146,54 @@ async function assertWilayaExists(
   }
 }
 
-/** Throw NOT_FOUND when the commune does not exist. */
-async function assertCommuneExists(
+/**
+ * CHANGED (was assertCommuneExists).
+ * Throw NOT_FOUND when the commune does not exist, and
+ * INVALID_ORDER_ADDRESS when it does not belong to the given wilaya.
+ * Shared by order creation and order information updates.
+ */
+async function assertCommuneInWilaya(
   communeId: number,
+  wilayaCode: string,
   tx: Tx
 ): Promise<void> {
-  const [row] = await tx
-    .select({ id: communes.id })
+  const [commune] = await tx
+    .select({ id: communes.id, wilayaId: communes.wilayaId })
     .from(communes)
     .where(eq(communes.id, communeId))
     .limit(1);
 
-  if (!row) {
+  if (!commune) {
     throw serviceError(`Commune with id ${communeId} not found`, "NOT_FOUND");
+  }
+
+  if (commune.wilayaId !== wilayaCode) {
+    throw serviceError(
+      `Commune with id ${communeId} does not belong to wilaya "${wilayaCode}"`,
+      "INVALID_ORDER_ADDRESS"
+    );
   }
 }
 
-/** Throw NOT_FOUND when the shipping company does not exist. */
-async function assertShippingCompanyExists(
+/**
+ * CHANGED (was assertShippingCompanyExists).
+ * Throw NOT_FOUND when the shipping company does not exist, is soft-deleted,
+ * or is inactive.
+ */
+async function assertShippingCompanyAvailable(
   shippingCompanyId: number,
   tx: Tx
 ): Promise<void> {
   const [row] = await tx
     .select({ id: shippingCompanies.id })
     .from(shippingCompanies)
-    .where(eq(shippingCompanies.id, shippingCompanyId))
+    .where(
+      and(
+        eq(shippingCompanies.id, shippingCompanyId),
+        isNull(shippingCompanies.deletedAt),
+        eq(shippingCompanies.status, "active")
+      )
+    )
     .limit(1);
 
   if (!row) {
@@ -163,6 +206,7 @@ async function assertShippingCompanyExists(
 
 /**
  * Return the shipping cost (as a number) for a given company + wilaya pair.
+ * CHANGED: only active prices are considered.
  * Throws SHIPPING_PRICE_NOT_FOUND when the combination is not configured.
  */
 async function fetchShippingCost(
@@ -176,7 +220,8 @@ async function fetchShippingCost(
     .where(
       and(
         eq(shippingPrices.shippingCompanyId, shippingCompanyId),
-        eq(shippingPrices.wilayaCode, wilayaCode)
+        eq(shippingPrices.wilayaCode, wilayaCode),
+        eq(shippingPrices.status, "active")
       )
     )
     .limit(1);
@@ -194,63 +239,71 @@ async function fetchShippingCost(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stock helpers
-// Both run inside the caller's transaction so they share the same DB snapshot.
+// Both run inside the caller's transaction.
+//
+// CHANGED: no more read-then-write. Each update is a single atomic SQL
+// statement, so concurrent checkouts can never oversell and concurrent
+// restores can never lose an increment.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Decrement stock for each order item that has both a color and a size.
- * Throws INSUFFICIENT_STOCK when any matching row would go negative.
- * Items without color+size are skipped (no stock row tracks them).
+ * Throws INSUFFICIENT_STOCK when no row matches or stock would go negative.
+ *
+ * The guard `stock >= quantity` lives inside the UPDATE itself: Postgres locks
+ * the row, re-checks the condition and decrements in one step.
+ *
+ * By the time this runs, validateVariants() has already guaranteed that every
+ * item of a product with colors and sizes carries both, so nothing can bypass
+ * stock tracking by omitting them.
  */
 async function decrementStock(
   items: OrderItemInput[],
   tx: Tx
 ): Promise<void> {
-  for (const item of items) {
-    if (!item.colorHex || !item.size) continue;
+  const lines = items
+    .filter((i) => i.colorHex && i.size)
+    // Stable order → concurrent checkouts lock rows in the same order,
+    // which avoids deadlocks.
+    .sort((a, b) =>
+      `${a.productId}:${a.colorHex}:${a.size}`.localeCompare(
+        `${b.productId}:${b.colorHex}:${b.size}`
+      )
+    );
 
-    const colorHex = item.colorHex.toUpperCase();
+  for (const item of lines) {
+    const colorHex = item.colorHex!.toUpperCase();
 
-    // Lock the row and check available stock before decrementing.
-    const [row] = await tx
-      .select({ id: productStock.id, stock: productStock.stock })
-      .from(productStock)
+    const updated = await tx
+      .update(productStock)
+      .set({ stock: sql`${productStock.stock} - ${item.quantity}` })
       .where(
         and(
           eq(productStock.productId, item.productId),
           eq(productStock.colorHex, colorHex),
-          eq(productStock.size, item.size as typeof productStock.size._.data)
+          eq(productStock.size, item.size!),
+          gte(productStock.stock, item.quantity)
         )
       )
-      .limit(1);
+      .returning({ id: productStock.id });
 
-    if (!row) {
-      throw serviceError(
-        `No stock entry found for product ${item.productId} ` +
-          `(colorHex: ${item.colorHex}, size: ${item.size})`,
-        "INSUFFICIENT_STOCK"
-      );
-    }
-
-    if (row.stock < item.quantity) {
+    if (updated.length === 0) {
       throw serviceError(
         `Insufficient stock for product ${item.productId} ` +
-          `(colorHex: ${item.colorHex}, size: ${item.size}): ` +
-          `requested ${item.quantity}, available ${row.stock}`,
+          `(colorHex: ${colorHex}, size: ${item.size})`,
         "INSUFFICIENT_STOCK"
       );
     }
-
-    await tx
-      .update(productStock)
-      .set({ stock: row.stock - item.quantity })
-      .where(eq(productStock.id, row.id));
   }
 }
 
 /**
  * Restore (increment) stock for every item in the order snapshot that has
- * both a color and a size.  Called when an order is canceled or returned.
+ * both a color and a size. Called when an order is canceled, returned, or
+ * deleted while still holding reserved stock.
+ *
+ * If the stock row no longer exists (color or product removed), the UPDATE
+ * matches 0 rows and the item is silently skipped.
  */
 async function restoreStock(
   orderProducts: OrderProduct[],
@@ -259,41 +312,32 @@ async function restoreStock(
   for (const item of orderProducts) {
     if (!item.colorHex || !item.size) continue;
 
-    const colorHex = item.colorHex.toUpperCase();
-
-    const [row] = await tx
-      .select({ id: productStock.id, stock: productStock.stock })
-      .from(productStock)
+    await tx
+      .update(productStock)
+      .set({ stock: sql`${productStock.stock} + ${item.quantity}` })
       .where(
         and(
           eq(productStock.productId, item.productId),
-          eq(productStock.colorHex, colorHex),
-          eq(productStock.size, item.size as typeof productStock.size._.data)
+          eq(productStock.colorHex, item.colorHex.toUpperCase()),
+          eq(productStock.size, item.size as ClothingSize)
         )
-      )
-      .limit(1);
-
-    // If the stock row was deleted (e.g. product removed) we silently skip.
-    if (!row) continue;
-
-    await tx
-      .update(productStock)
-      .set({ stock: row.stock + item.quantity })
-      .where(eq(productStock.id, row.id));
+      );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Create order
 //
-// All DB work runs inside a single serializable-level transaction:
-//   1. Validate FK targets (wilaya, commune, shipping company).
+// All DB work runs inside a single transaction:
+//   1. Validate FK targets (wilaya, commune ↔ wilaya, shipping company).
 //   2. Fetch the shipping cost for the chosen company + wilaya pair.
-//   3. Fetch live product rows for every item in the cart.
-//   4. Guard: every requested product must exist.
+//   3. Fetch live product rows AND their colors from product_colors.
+//   4. Guard: every product must exist and every variant (color/size) must be
+//      valid for that product.                                         (CHANGED)
 //   5. Optionally validate the coupon code (fails fast on invalid code).
 //   6. Build the product snapshot array and compute the server-side total.
-//   7. Decrement stock for items that have color + size.
+//      The color NAME comes from product_colors, never from the client. (CHANGED)
+//   7. Atomically decrement stock for items that have color + size.     (CHANGED)
 //   8. Insert the order row and return the new record.
 //
 // Computing the total on the server prevents price-manipulation attacks where
@@ -316,8 +360,8 @@ export async function createOrderService(
   return db.transaction(async (tx) => {
     // ── Step 1: Validate FK targets ─────────────────────────────────────────
     await assertWilayaExists(wilayaCode, tx);
-    await assertCommuneExists(communeId, tx);
-    await assertShippingCompanyExists(shippingCompanyId, tx);
+    await assertCommuneInWilaya(communeId, wilayaCode, tx);
+    await assertShippingCompanyAvailable(shippingCompanyId, tx);
 
     // ── Step 2: Fetch shipping cost ─────────────────────────────────────────
     const shippingCost = await fetchShippingCost(
@@ -326,9 +370,7 @@ export async function createOrderService(
       tx
     );
 
-    // ── Step 3: Fetch live product rows ─────────────────────────────────────
-    // Read inside the transaction so any concurrent price change that commits
-    // before our INSERT is captured in the snapshot and the computed total.
+    // ── Step 3: Fetch live product rows + their colors ──────────────────────
     // Only active (non-soft-deleted) products are eligible for purchase.
     const productIds = [...new Set(items.map((i) => i.productId))];
 
@@ -338,18 +380,69 @@ export async function createOrderService(
         title: products.title,
         price: products.price,
         promo: products.promo,
+        sizes: products.sizes, // NEW
       })
       .from(products)
       .where(and(inArray(products.id, productIds), isNull(products.deletedAt)));
 
-    // ── Step 4: Guard – every requested product must exist ──────────────────
+    // NEW: colors of every product in the cart.
+    const colorRows = await tx
+      .select({
+        productId: productColors.productId,
+        hex: productColors.hex,
+        name: productColors.name,
+      })
+      .from(productColors)
+      .where(inArray(productColors.productId, productIds));
+
+    // "productId:HEX" → color name (source of truth for the snapshot).
+    const colorNameByKey = new Map(
+      colorRows.map((c) => [`${c.productId}:${c.hex}`, c.name])
+    );
+    // Products that define at least one color (so a color is mandatory).
+    const productsWithColors = new Set(colorRows.map((c) => c.productId));
+
+    // ── Step 4: Guard – product exists AND variant is valid ─────────────────
     const productMap = new Map(productRows.map((r) => [r.id, r]));
 
     for (const item of items) {
-      if (!productMap.has(item.productId)) {
+      const row = productMap.get(item.productId);
+
+      if (!row) {
         throw serviceError(
           `Product with id ${item.productId} not found`,
           "NOT_FOUND"
+        );
+      }
+
+      // Color: required if the product has colors; must belong to the product.
+      const hex = item.colorHex?.toUpperCase();
+      if (hex) {
+        if (!colorNameByKey.has(`${item.productId}:${hex}`)) {
+          throw serviceError(
+            `Color ${hex} is not available for product ${item.productId}`,
+            "INVALID_VARIANT"
+          );
+        }
+      } else if (productsWithColors.has(item.productId)) {
+        throw serviceError(
+          `A color must be selected for product ${item.productId}`,
+          "INVALID_VARIANT"
+        );
+      }
+
+      // Size: required if the product has sizes; must be one of them.
+      if (item.size) {
+        if (!row.sizes.includes(item.size)) {
+          throw serviceError(
+            `Size ${item.size} is not available for product ${item.productId}`,
+            "INVALID_VARIANT"
+          );
+        }
+      } else if (row.sizes.length > 0) {
+        throw serviceError(
+          `A size must be selected for product ${item.productId}`,
+          "INVALID_VARIANT"
         );
       }
     }
@@ -386,8 +479,14 @@ export async function createOrderService(
         price: unitPrice.toFixed(2),
       };
 
-      if (item.color) snapshot.color = item.color;
-      if (item.colorHex) snapshot.colorHex = item.colorHex.toUpperCase();
+      // CHANGED: hex is the identity; the name is read from product_colors.
+      // The snapshot freezes both at purchase time, so a later rename in
+      // product_colors does not alter past orders.
+      if (item.colorHex) {
+        const hex = item.colorHex.toUpperCase();
+        snapshot.colorHex = hex;
+        snapshot.color = colorNameByKey.get(`${item.productId}:${hex}`)!;
+      }
       if (item.size) snapshot.size = item.size;
 
       return snapshot;
@@ -458,8 +557,8 @@ export async function getOrderByIdService(id: number): Promise<Order> {
 // Search (single input) matches any of:
 //   • customer name        (ILIKE)
 //   • phone number         (ILIKE)
-//   • order id             (cast to text, exact prefix match)
-//   • wilaya name          (JOIN wilayas, ILIKE)
+//   • order id             (cast to text, ILIKE)
+//   • wilaya name          (EXISTS sub-select, ILIKE)
 //
 // Filters:
 //   status | wilayaCode | dateFrom | dateTo | totalMin | totalMax
@@ -528,7 +627,7 @@ export async function getAllOrdersService(
       or(
         ilike(orders.name, term),
         ilike(orders.phoneNumber, term),
-        // Cast numeric id to text so we can do a prefix ILIKE on it
+        // Cast numeric id to text so we can do an ILIKE on it
         sql`${orders.id}::text ILIKE ${term}`,
         // Sub-select: order's wilaya name from the wilayas table
         sql`EXISTS (
@@ -618,26 +717,7 @@ export async function updateOrderInformationService(
       if (payload.wilayaCode !== undefined) {
         await assertWilayaExists(wilayaCode, tx);
       }
-
-      const [commune] = await tx
-        .select({ id: communes.id, wilayaId: communes.wilayaId })
-        .from(communes)
-        .where(eq(communes.id, communeId))
-        .limit(1);
-
-      if (!commune) {
-        throw serviceError(
-          `Commune with id ${communeId} not found`,
-          "NOT_FOUND"
-        );
-      }
-
-      if (commune.wilayaId !== wilayaCode) {
-        throw serviceError(
-          `Commune with id ${communeId} does not belong to wilaya "${wilayaCode}"`,
-          "INVALID_ORDER_ADDRESS"
-        );
-      }
+      await assertCommuneInWilaya(communeId, wilayaCode, tx);
     }
 
     const [updated] = await tx
@@ -656,8 +736,11 @@ export async function updateOrderInformationService(
 // This operation changes only the `status` field. Customer contact and
 // delivery information have their own targeted update service above.
 //
-// Additional business rule: once an order reaches a terminal state
-// ("canceled" or "returned") it cannot transition to any other state.
+// Business rule: once an order reaches a terminal state ("canceled" or
+// "returned") it cannot transition to any other state.
+//
+// CHANGED: the order row is locked (FOR UPDATE) so two concurrent "cancel"
+// requests cannot both pass the terminal guard and restore stock twice.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function updateOrderStatusService(
@@ -665,12 +748,12 @@ export async function updateOrderStatusService(
   payload: UpdateOrderStatusPayload
 ): Promise<Order> {
   return db.transaction(async (tx) => {
-    // Read current state before updating so we can enforce transition rules.
     const [existing] = await tx
       .select()
       .from(orders)
       .where(and(isNull(orders.deletedAt), eq(orders.id, id)))
-      .limit(1);
+      .limit(1)
+      .for("update");
 
     if (!existing) {
       throw serviceError(`Order with id ${id} not found`, "NOT_FOUND");
@@ -687,10 +770,9 @@ export async function updateOrderStatusService(
     }
 
     // Restore stock when the order moves to a terminal status.
-    // We only restore if the previous status was one that consumed stock
-    // (i.e. not already a stock-restoring state).
-    const stockRestoringStatuses: Order["status"][] = ["canceled", "returned"];
-    if (stockRestoringStatuses.includes(payload.status)) {
+    // Safe from double-restore: the row is locked and terminal orders are
+    // rejected above.
+    if (terminalStatuses.includes(payload.status)) {
       await restoreStock(existing.products as OrderProduct[], tx);
     }
 
@@ -709,24 +791,39 @@ export async function updateOrderStatusService(
 //
 // Soft-deletes the order row by stamping `deletedAt` and returns its snapshot.
 // The row is preserved in the database for auditing and historical reporting.
+//
+// CHANGED: deleting an order that still holds reserved stock (pending or
+// confirmed) releases that stock. Orders that are delivered, canceled or
+// returned are left alone: delivered stock is really gone, and canceled /
+// returned orders already restored theirs.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function deleteOrderByIdService(id: number): Promise<Order> {
-  const [existing] = await db
-    .select()
-    .from(orders)
-    .where(eq(orders.id, id))
-    .limit(1);
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(orders)
+      .where(eq(orders.id, id))
+      .limit(1)
+      .for("update");
 
-  if (!existing || existing.deletedAt) {
-    throw serviceError(`Order with id ${id} not found`, "NOT_FOUND");
-  }
+    if (!existing || existing.deletedAt) {
+      throw serviceError(`Order with id ${id} not found`, "NOT_FOUND");
+    }
 
-  await db.update(orders).set({ deletedAt: new Date().toISOString().slice(0, 10) }).where(eq(orders.id, id));
+    const stockHoldingStatuses: Order["status"][] = ["pending", "confirmed"];
+    if (stockHoldingStatuses.includes(existing.status)) {
+      await restoreStock(existing.products as OrderProduct[], tx);
+    }
 
-  return existing;
+    await tx
+      .update(orders)
+      .set({ deletedAt: new Date().toISOString().slice(0, 10) })
+      .where(eq(orders.id, id));
+
+    return existing;
+  });
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stats
@@ -737,11 +834,11 @@ export async function deleteOrderByIdService(id: number): Promise<Order> {
 // under-report how much money the store has earned.
 //
 // Only revenue-generating statuses are counted:
-//   ✅ confirmed  – order accepted and paid
-//   ✅ delivered    – in transit, payment collected
+//   ✅ confirmed  – order accepted
+//   ✅ delivered  – delivered, payment collected
 //   ❌ pending    – not yet confirmed
 //   ❌ canceled   – no money collected
-//   ❌ returned   – money refunded
+//   ❌ returned   – COD order not collected
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Shape returned by getOrderStatsService. */
@@ -758,32 +855,24 @@ const REVENUE_STATUSES: Order["status"][] = ["confirmed", "delivered"];
 
 export async function getOrderStatsService(): Promise<OrderStats> {
   // ── Revenue ──────────────────────────────────────────────────────────────
-  // SUM(total) across every confirmed/delivered order regardless of deletedAt.
-  // Using a raw SQL aggregation so we do a single round-trip.
+  // CHANGED: inArray(REVENUE_STATUSES) instead of notInArray(...), so a new
+  // status added to the enum later is not counted as revenue by accident.
   const [revenueRow] = await db
     .select({
       totalRevenue: sql<string>`COALESCE(SUM(${orders.total}), 0)::text`,
     })
     .from(orders)
-    .where(
-      // Include soft-deleted rows — only filter by business-meaningful status.
-      notInArray(orders.status, ["pending", "canceled", "returned"] as Order["status"][])
-    );
+    .where(inArray(orders.status, REVENUE_STATUSES));
 
   // ── Active order count ───────────────────────────────────────────────────
-  // Orders the admin can see in the dashboard (soft-deleted excluded).
   const [activeRow] = await db
-    .select({
-      count: sql<number>`COUNT(*)::int`,
-    })
+    .select({ count: sql<number>`COUNT(*)::int` })
     .from(orders)
     .where(isNull(orders.deletedAt));
 
   // ── All-time order count ─────────────────────────────────────────────────
   const [allTimeRow] = await db
-    .select({
-      count: sql<number>`COUNT(*)::int`,
-    })
+    .select({ count: sql<number>`COUNT(*)::int` })
     .from(orders);
 
   return {
