@@ -18,12 +18,16 @@ import shippingRouter from './router/shipping.router.js';
 import authRouter from './router/auth.router.js';
 import adminRouter from './router/admin.router.js';
 
+const PORT = process.env.PORT || 5000;
+const DATABASE_URL = process.env.DATABASE_URL;   // Neon
+const REDIS_URL = process.env.REDIS_URL;         // Redis
+
 const app = express();
 
 app.disable('x-powered-by');
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CLIENT_ORIGIN ?? 'http://localhost:5174',
+  origin: ["http://localhost:3000", "http://localhost:5173"],
   credentials: true,
 }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
@@ -33,6 +37,8 @@ app.use(rateLimit({
   standardHeaders: 'draft-8',
   legacyHeaders: false,
 }));
+
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
@@ -59,5 +65,7 @@ app.use((_req, res) => {
 });
 
 app.use(errorHandler);
+
+
 
 export default app;
