@@ -30,8 +30,8 @@ export default function Navbar({ categories }: NavbarProps) {
         <div className="flex items-center gap-6">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 shrink-0">
-            <span className="font-serif text-xl font-bold tracking-tight text-foreground">
-              MAYA<span className="text-muted-foreground font-light">STORE</span>
+            <span className="font-[family-name:var(--font-tenor-sans)] text-xl font-bold tracking-tight text-foreground">
+              MAISON
             </span>
           </Link>
 
