@@ -27,7 +27,7 @@ const app = express();
 app.disable('x-powered-by');
 app.use(helmet());
 app.use(cors({
-  origin: ["http://localhost:3000", process.env.CORS_ORIGINS],
+  origin: ["http://localhost:3000", "https://localhost:5174", "https://maison-phi-six.vercel.app/"],
   credentials: true,
 }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
