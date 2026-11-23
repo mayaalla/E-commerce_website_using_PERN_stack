@@ -9,8 +9,23 @@ export function useDeleteOrder() {
 
   return useMutation<DeleteOrderResponse, Error, number>({
     mutationFn: deleteOrder,
-    onSuccess: (_response, id) => {
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
+    onSuccess: async (response, id) => {
+      const order = response.data;
+      const stockInvalidations =
+        order.status === "pending" || order.status === "confirmed"
+          ? Array.from(
+              new Set(order.products.map((item) => item.productId)),
+              (productId) =>
+                queryClient.invalidateQueries({
+                  queryKey: ["products", productId, "stock"],
+                }),
+            )
+          : [];
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["orders"] }),
+        ...stockInvalidations,
+      ]);
       queryClient.removeQueries({ queryKey: orderQueryKey(id) });
     },
   });
