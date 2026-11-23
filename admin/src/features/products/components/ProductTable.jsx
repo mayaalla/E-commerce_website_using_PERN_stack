@@ -31,9 +31,12 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 
-import { useUpdateProduct, useDeleteProduct } from "@/features/products";
+import { useUpdateProduct } from "../hooks/useUpdateProduct";
+import { useDeleteProduct } from "../hooks/useDeleteProduct";
+import { useGetProductStock } from "../hooks/useGetProductStock";
 import { useGetCategories } from "@/features/categories";
 import { apiClient } from "@/lib/api-client";
+import { cloudinaryUploadResponseSchema, uploadResponseTokensSchema } from "../schemas";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CLOTHING_SIZES = ["34", "36", "38", "40", "42", "44", "46", "48"];
@@ -79,38 +82,18 @@ const LIGHT_HEXES = new Set([
 ]);
 const isLightHex = (hex) => LIGHT_HEXES.has(hex.toUpperCase());
 
-/**
- * Convert the product's colors array (string names) into the
- * selectedColors format: { hex, name }[].
- *
- * Strategy:
- *   • If the name matches a preset label → use that preset's hex.
- *   • If the name is itself a valid hex (#RRGGBB) → use it directly.
- *   • Otherwise → store it as a chip with a generated hex placeholder
- *     that won't collide with presets (we use the string as both hex key
- *     and name, but wrapped so the UI still works).
- */
 function colorsArrayToSelected(colors) {
-  return colors.map((name) => {
-    // Try to find a matching preset by label (case-insensitive)
-    const preset = PRESET_COLORS.find(
-      (p) => p.label.toLowerCase() === name.toLowerCase()
-    );
-    if (preset) return { hex: preset.hex.toUpperCase(), name: preset.label };
+  return colors.map(({ name, hex }) => ({
+    name,
+    hex: `#${hex.replace(/^#/, "").toUpperCase()}`,
+  }));
+}
 
-    // Check if it's already a hex value
-    if (/^#[0-9A-Fa-f]{6}$/.test(name)) {
-      return { hex: name.toUpperCase(), name: name.toUpperCase() };
-    }
-
-    // Unknown name — store it with a fake hex key so the chip renders.
-    // We generate a stable-ish key by hashing the name string.
-    const fakeHex = "#" + [...name].reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) & 0xffffff, 0)
-      .toString(16)
-      .padStart(6, "0")
-      .toUpperCase();
-    return { hex: fakeHex, name };
-  });
+function normalizeProductColors(colors) {
+  return colors.map(({ name, hex }) => ({
+    name: name.trim(),
+    hex: hex.replace(/^#/, "").toUpperCase(),
+  }));
 }
 
 // ─── EditProductDialog ────────────────────────────────────────────────────────
@@ -125,9 +108,9 @@ function colorsArrayToSelected(colors) {
  * We use a flat map (not a nested object) so React state updates stay simple
  * and we can always derive the array for the API from the current form state.
  */
-function buildInitialStockGrid(product) {
+function buildInitialStockGrid(stockEntries) {
   const grid = {};
-  for (const entry of product.stock ?? []) {
+  for (const entry of stockEntries) {
     // colorHex from API is already uppercase without #
     const key = `${entry.colorHex.toUpperCase()}|${entry.size}`;
     grid[key] = String(entry.stock);
@@ -142,7 +125,7 @@ function buildInitialForm(product) {
     price: String(product.price),
     promo: product.promo ?? "",
     categoryId: String(product.categoryId),
-    // Convert string names → { hex, name }[] using the helper above
+    // Preserve each backend color's name and stable hex identity.
     selectedColors: colorsArrayToSelected(product.colors),
     sizes: [...product.sizes],
   };
@@ -160,6 +143,11 @@ function buildInitialImageDraft(product) {
 function EditProductDialog({ product, open, onOpenChange }) {
   const { data: categoriesData, isSuccess: categoriesLoaded } = useGetCategories();
   const categories = categoriesData?.data ?? [];
+  const stockQuery = useGetProductStock(product.id, open);
+  const stockRows = stockQuery.data?.data;
+  const initialStockGrid = useMemo(() => buildInitialStockGrid(stockRows ?? []), [stockRows]);
+  const isLoadingStock = open && (stockQuery.isPending || stockQuery.isFetching);
+  const isStockReady = stockQuery.isSuccess && !stockQuery.isFetching;
 
   // Initialise draft from current product values
   const [form, setForm] = useState(() => buildInitialForm(product));
@@ -174,15 +162,9 @@ function EditProductDialog({ product, open, onOpenChange }) {
   /** Optional custom name the admin types before hitting "Add" */
   const [pickerName, setPickerName] = useState("");
 
-  /**
-   * Stock grid: flat map keyed by "COLORHEX|size" → stock count (string).
-   *
-   * NOTE: GET /products (the list) does NOT embed stock — only create/update
-   * responses do. So we fetch GET /products/:id when the dialog opens to get
-   * the real stock data, then hydrate the grid from it.
-   */
-  const [stockGrid, setStockGrid] = useState({});
-  const [isLoadingStock, setIsLoadingStock] = useState(false);
+  // Edited values are local form state; untouched values come from the stock query.
+  const [stockGrid, setStockGrid] = useState(null);
+  const currentStockGrid = stockGrid ?? initialStockGrid;
 
   // Re-sync form state whenever the dialog is opened (or product data changes),
   // so that re-opening the dialog after a save always shows fresh data.
@@ -195,29 +177,7 @@ function EditProductDialog({ product, open, onOpenChange }) {
     setErrors({});
     setPickerHex("#e11d48");
     setPickerName("");
-
-    // Fetch the stock for this product from the dedicated stock endpoint.
-    // The list endpoint omits stock for performance; GET /products/:id also
-    // does not include stock — only GET /products/:id/stock does.
-    setIsLoadingStock(true);
-    apiClient
-      .get(`/products/${product.id}/stock`)
-      .then((res) => {
-        // The stock endpoint returns { success: true, data: StockEntry[] }
-        const stockEntries = res.data?.data ?? [];
-        const grid = {};
-        for (const entry of stockEntries) {
-          const key = `${entry.colorHex.toUpperCase()}|${entry.size}`;
-          grid[key] = String(entry.stock);
-        }
-        setStockGrid(grid);
-      })
-      .catch(() => {
-        // If the fetch fails, fall back to whatever stock is already on the
-        // product object (empty on list responses → shows 0s, which is safe).
-        setStockGrid(buildInitialStockGrid(product));
-      })
-      .finally(() => setIsLoadingStock(false));
+    setStockGrid(null);
   }, [open, product]);
 
   /**
@@ -228,14 +188,14 @@ function EditProductDialog({ product, open, onOpenChange }) {
    */
   function setStockCell(colorHex, size, rawValue) {
     const key = `${colorHex}|${size}`;
-    setStockGrid((prev) => ({ ...prev, [key]: rawValue }));
+    setStockGrid((prev) => ({ ...(prev ?? initialStockGrid), [key]: rawValue }));
   }
 
   /**
    * Read a cell value from the grid (defaults to "0").
    */
   function getStockCell(colorHex, size) {
-    return stockGrid[`${colorHex}|${size}`] ?? "0";
+    return currentStockGrid[`${colorHex}|${size}`] ?? "0";
   }
 
   /**
@@ -248,12 +208,22 @@ function EditProductDialog({ product, open, onOpenChange }) {
     for (const { hex } of form.selectedColors) {
       const colorHex = hex.replace("#", "").toUpperCase();
       for (const size of form.sizes) {
-        const rawVal = stockGrid[`${colorHex}|${size}`] ?? "0";
+        const rawVal = currentStockGrid[`${colorHex}|${size}`] ?? "0";
         const qty = parseInt(rawVal, 10);
         entries.push({ colorHex, size, stock: isNaN(qty) || qty < 0 ? 0 : qty });
       }
     }
     return entries;
+  }
+
+  function hasStockChanged() {
+    const originalStock = new Map(
+      (stockRows ?? []).map((entry) => [`${entry.colorHex.toUpperCase()}|${entry.size}`, entry.stock])
+    );
+    return buildStockEntries().some((entry) => {
+      const key = `${entry.colorHex}|${entry.size}`;
+      return entry.stock !== (originalStock.get(key) ?? 0);
+    });
   }
 
   const { mutate: update, isPending: isUpdating } = useUpdateProduct();
@@ -265,7 +235,7 @@ function EditProductDialog({ product, open, onOpenChange }) {
   // While stock is still loading we treat the form as not-dirty so the button
   // stays disabled until we have a real baseline to compare against.
   const isDirty = useMemo(() => {
-    if (isLoadingStock) return false;
+    if (!isStockReady) return false;
 
     const hasNewImages = imageDraft.some((img) => img.file);
     const hasImageRemovals =
@@ -285,8 +255,8 @@ function EditProductDialog({ product, open, onOpenChange }) {
     if (parseInt(form.categoryId, 10) !== product.categoryId) return true;
 
     if (
-      JSON.stringify(form.selectedColors.map((c) => c.name || c.hex)) !==
-      JSON.stringify(product.colors)
+      JSON.stringify(normalizeProductColors(form.selectedColors)) !==
+      JSON.stringify(normalizeProductColors(product.colors))
     ) return true;
 
     if (
@@ -294,26 +264,11 @@ function EditProductDialog({ product, open, onOpenChange }) {
       JSON.stringify([...product.sizes].sort())
     ) return true;
 
-    // Compare stock grid against the fetched baseline
-    const currentEntries = buildStockEntries();
-    const originalEntries = Object.entries(stockGrid).map(([key, val]) => {
-      const [colorHex, size] = key.split("|");
-      return { colorHex, size, stock: parseInt(val, 10) || 0 };
-    });
-
-    const sortEntries = (arr) =>
-      [...arr].sort((a, b) =>
-        `${a.colorHex}|${a.size}`.localeCompare(`${b.colorHex}|${b.size}`)
-      );
-
-    if (
-      JSON.stringify(sortEntries(currentEntries)) !==
-      JSON.stringify(sortEntries(originalEntries))
-    ) return true;
+    if (hasStockChanged()) return true;
 
     return false;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, imageDraft, stockGrid, isLoadingStock, product]);
+  }, [form, imageDraft, stockGrid, initialStockGrid, stockRows, isStockReady, product]);
 
   // ── helpers ────────────────────────────────────────────────────────────────
   function setField(field, value) {
@@ -449,6 +404,7 @@ function EditProductDialog({ product, open, onOpenChange }) {
       ...prev,
       selectedColors: prev.selectedColors.filter((c) => c.hex !== key),
     }));
+    setErrors((previous) => ({ ...previous, colors: "" }));
   }
 
   function renameColor(hex, newName) {
@@ -459,6 +415,7 @@ function EditProductDialog({ product, open, onOpenChange }) {
         c.hex === key ? { ...c, name: newName } : c
       ),
     }));
+    setErrors((previous) => ({ ...previous, colors: "" }));
   }
 
   // ── build payload: always include all fields so the backend never
@@ -493,8 +450,8 @@ function EditProductDialog({ product, open, onOpenChange }) {
       price:       normalisePrice(form.price.trim()),
       promo:       rawPromo === "" ? null : normalisePrice(rawPromo),
       categoryId:  parseInt(form.categoryId, 10),
-      // Derive color name strings to send to the backend
-      colors:      form.selectedColors.map((c) => c.name || c.hex),
+      // The API stores the display name and stable hex identity together.
+      colors:      normalizeProductColors(form.selectedColors),
       sizes:       form.sizes,
       // Always send the stock grid so the backend replaces it atomically.
       // buildStockEntries() only emits cells for the current colors × sizes
@@ -537,6 +494,13 @@ function EditProductDialog({ product, open, onOpenChange }) {
     }
     if (!form.categoryId) next.categoryId = "Category is required.";
 
+    const colorNames = form.selectedColors.map((color) => color.name.trim());
+    if (colorNames.some((name) => !name)) {
+      next.colors = "Every selected color needs a name.";
+    } else if (new Set(colorNames.map((name) => name.toLowerCase())).size !== colorNames.length) {
+      next.colors = "Color names must be unique.";
+    }
+
     const hasImageChanges =
       imageDraft.length !== (product.images ?? []).length ||
       imageDraft.some((image, index) => image.file || image.originalIndex !== index);
@@ -560,7 +524,7 @@ function EditProductDialog({ product, open, onOpenChange }) {
         })),
       }
     );
-    const tokens = tokenResponse.data.data;
+    const tokens = uploadResponseTokensSchema.parse(tokenResponse.data).data;
 
     if (!Array.isArray(tokens) || tokens.length !== images.length) {
       throw new Error("The server returned invalid image upload tokens.");
@@ -587,9 +551,12 @@ function EditProductDialog({ product, open, onOpenChange }) {
           );
         }
 
-        const data = await response.json();
+        const data = cloudinaryUploadResponseSchema.parse(await response.json());
+        if (data.public_id !== publicId) {
+          throw new Error("The uploaded image did not match its signed upload token.");
+        }
         return {
-          publicId: data.public_id ?? publicId,
+          publicId: data.public_id,
           version: data.version,
           signature: data.signature,
           ...(image.originalUrl ? { replaceImage: image.originalUrl } : {}),
@@ -600,36 +567,14 @@ function EditProductDialog({ product, open, onOpenChange }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!validate()) return;
+    if (!isStockReady || !validate()) return;
 
     const payload = buildPayload();
     const pendingImages = imageDraft.filter((image) => image.file);
 
     // Detect whether anything actually changed so we can skip the network
     // round-trip when the user clicks Save without touching anything.
-    const currentStockEntries = buildStockEntries();
-    const originalStockEntries = (product.stock ?? [])
-      .filter((s) => {
-        // Only keep original entries that are still part of the current color×size matrix
-        const colorInForm = form.selectedColors.some(
-          (c) => c.hex.replace("#", "").toUpperCase() === s.colorHex.toUpperCase()
-        );
-        const sizeInForm = form.sizes.includes(s.size);
-        return colorInForm && sizeInForm;
-      })
-      .map((s) => ({ colorHex: s.colorHex.toUpperCase(), size: s.size, stock: s.stock }));
-
-    const stockChanged =
-      JSON.stringify(
-        [...currentStockEntries].sort((a, b) =>
-          `${a.colorHex}|${a.size}`.localeCompare(`${b.colorHex}|${b.size}`)
-        )
-      ) !==
-      JSON.stringify(
-        [...originalStockEntries].sort((a, b) =>
-          `${a.colorHex}|${a.size}`.localeCompare(`${b.colorHex}|${b.size}`)
-        )
-      );
+    const stockChanged = hasStockChanged();
 
     const nothingChanged =
       pendingImages.length === 0 &&
@@ -641,7 +586,8 @@ function EditProductDialog({ product, open, onOpenChange }) {
       (form.promo.trim() === "" ? null : normalisePrice(form.promo.trim())) ===
         (product.promo == null ? null : normalisePrice(String(product.promo))) &&
       parseInt(form.categoryId, 10) === product.categoryId &&
-      JSON.stringify(form.selectedColors.map((c) => c.name || c.hex)) === JSON.stringify(product.colors) &&
+      JSON.stringify(normalizeProductColors(form.selectedColors)) ===
+        JSON.stringify(normalizeProductColors(product.colors)) &&
       JSON.stringify([...form.sizes].sort()) === JSON.stringify([...product.sizes].sort());
 
     if (nothingChanged) {
@@ -1170,6 +1116,12 @@ function EditProductDialog({ product, open, onOpenChange }) {
             )}
           </div>
 
+          {errors.colors && (
+            <p role="alert" className="text-xs text-destructive">
+              {errors.colors}
+            </p>
+          )}
+
           {/* ── Sizes ──────────────────────────────────────────────────── */}
           <div className="flex flex-col gap-1.5">
             <Label>Sizes</Label>
@@ -1203,7 +1155,21 @@ function EditProductDialog({ product, open, onOpenChange }) {
           </div>
 
           {/* ── Stock Grid ─────────────────────────────────────────────── */}
-          {form.selectedColors.length > 0 && form.sizes.length > 0 ? (
+          {isLoadingStock && (
+            <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+              Loading product stock…
+            </p>
+          )}
+          {stockQuery.isError && (
+            <div role="alert" className="flex flex-col items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs">
+              <p>Could not load product stock: {stockQuery.error.message}</p>
+              <Button type="button" variant="outline" size="sm" onClick={() => stockQuery.refetch()}>
+                Retry stock load
+              </Button>
+            </div>
+          )}
+          {form.selectedColors.length > 0 && form.sizes.length > 0 && isStockReady ? (
             <div className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <Label>
@@ -1266,7 +1232,7 @@ function EditProductDialog({ product, open, onOpenChange }) {
                                 step="1"
                                 value={getStockCell(colorHex, size)}
                                 onChange={(e) => setStockCell(colorHex, size, e.target.value)}
-                                disabled={isPending}
+                                disabled={isPending || !isStockReady}
                                 aria-label={`Stock for ${name} size ${size}`}
                                 className="h-8 w-16 text-center text-sm tabular-nums px-1 mx-auto"
                               />
@@ -1285,6 +1251,7 @@ function EditProductDialog({ product, open, onOpenChange }) {
             </div>
           ) : (
             /* Guidance when no colors or sizes are selected yet */
+            !isLoadingStock && !stockQuery.isError &&
             (form.selectedColors.length > 0 || form.sizes.length > 0) && (
               <div className="rounded-lg border border-dashed border-input bg-muted/10 px-4 py-3">
                 <p className="text-xs text-muted-foreground">
@@ -1313,7 +1280,7 @@ function EditProductDialog({ product, open, onOpenChange }) {
           <Button
             type="submit"
             form={`edit-product-form-${product.id}`}
-            disabled={isPending || !isDirty}
+            disabled={isPending || !isStockReady || !isDirty}
             className="gap-1.5"
           >
             {isPending ? (
@@ -1418,8 +1385,8 @@ function ProductRow({ product, categoryMap = {} }) {
       <TableCell>
         <div className="flex flex-wrap gap-1">
           {visibleColors.map((color) => (
-            <Badge key={color} variant="outline" className="text-xs capitalize">
-              {color}
+            <Badge key={color.hex} variant="outline" className="text-xs capitalize">
+              {color.name}
             </Badge>
           ))}
           {extraColors > 0 && (
