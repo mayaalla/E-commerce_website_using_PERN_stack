@@ -156,6 +156,10 @@ type ApiEnvelope<T> = {
   data: T;
 };
 
+type PaginatedProductsResponse = ApiEnvelope<Product[]> & {
+  totalPages: number;
+};
+
 function unwrapApiEnvelope<T>(response: T | ApiEnvelope<T>): T {
   if (
     typeof response === "object" &&
@@ -174,51 +178,48 @@ export type Product = {
   description: string;
   price: string;
   images: string[];
-  colors: string[];
+  colors: ProductColor[];
   sizes: string[];
   promo: string | null;
   categoryId: number;
   deletedAt: string | null;
-  /** Present when the product API exposes its available inventory count. */
-  stock?: number | string | null;
-  stockQuantity?: number | string | null;
-  availableQuantity?: number | string | null;
-  quantity?: number | string | null;
-  inStock?: boolean;
-  isInStock?: boolean;
-  availability?: string;
-  status?: string;
+};
+
+export type ProductColor = {
+  name: string;
+  /** Bare, uppercase six-digit hex; this is the color's stable identity. */
+  hex: string;
 };
 
 export type ProductStock = {
   id: number;
   productId: number;
   colorHex: string;
-  size: string | null;
+  colorName: string;
+  size: string;
   stock: number;
 };
 
-export function getProductStock(product: Product): number | null {
-  const inventory = [
-    product.stock,
-    product.stockQuantity,
-    product.availableQuantity,
-    product.quantity,
-  ].find((value) => value !== undefined && value !== null);
-  if (inventory === undefined) return null;
-
-  const stock = Number(inventory);
-  return Number.isFinite(stock) ? Math.max(0, Math.floor(stock)) : null;
+export function getProductTotalStock(
+  stockRows: readonly ProductStock[] | null,
+): number | null {
+  return stockRows?.reduce((total, row) => total + row.stock, 0) ?? null;
 }
 
-export function isProductOutOfStock(product: Product) {
+export function isProductOutOfStock(
+  product: Product,
+  stockRows: readonly ProductStock[] | null = null,
+) {
   if (product.deletedAt) return true;
-  if (product.inStock === false || product.isInStock === false) return true;
-  if (/out[-_\s]?of[-_\s]?stock|sold[-_\s]?out/i.test(`${product.availability ?? ""} ${product.status ?? ""}`)) {
-    return true;
-  }
 
-  return getProductStock(product) === 0;
+  // The backend tracks stock per (colorHex, size) row. A product with both
+  // variant dimensions is unavailable when every returned row is empty or zero.
+  const hasStockTrackedVariants = product.colors.length > 0 && product.sizes.length > 0;
+  return (
+    hasStockTrackedVariants &&
+    stockRows !== null &&
+    getProductTotalStock(stockRows) === 0
+  );
 }
 
 export type Wilaya = { code: string; name: string };
@@ -239,7 +240,7 @@ export type ShippingPrice = {
 export type OrderProductInput = {
   productId: number;
   quantity: number;
-  color?: string;
+  colorHex?: string;
   size?: string;
 };
 
@@ -269,6 +270,7 @@ export type CreateOrderResult = {
       quantity: number;
       price: string;
       color?: string;
+      colorHex?: string;
       size?: string;
     }>;
   };
@@ -283,10 +285,28 @@ export type CreateOrderResult = {
 };
 
 export const productsApi = {
-  getAll: async () =>
-    unwrapApiEnvelope<Product[]>(
-      await api.get<Product[] | ApiEnvelope<Product[]>>("/api/products"),
-    ),
+  getAll: async () => {
+    const response = await api.get<PaginatedProductsResponse>(
+      "/api/products?page=1&limit=20",
+    );
+    return response.data;
+  },
+  getAllPages: async () => {
+    const pageSize = 100;
+    const firstPage = await api.get<PaginatedProductsResponse>(
+      `/api/products?page=1&limit=${pageSize}`,
+    );
+    const products = [...firstPage.data];
+
+    for (let page = 2; page <= firstPage.totalPages; page += 1) {
+      const response = await api.get<PaginatedProductsResponse>(
+        `/api/products?page=${page}&limit=${pageSize}`,
+      );
+      products.push(...response.data);
+    }
+
+    return products;
+  },
   getById: async (id: number) =>
     unwrapApiEnvelope<Product>(
       await api.get<Product | ApiEnvelope<Product>>(`/api/products/${id}`),
@@ -295,6 +315,7 @@ export const productsApi = {
     unwrapApiEnvelope<ProductStock[]>(
       await api.get<ProductStock[] | ApiEnvelope<ProductStock[]>>(
         `/api/products/${id}/stock`,
+        { cache: "no-store" },
       ),
     ),
   getByCategory: async (categoryId: number) =>
