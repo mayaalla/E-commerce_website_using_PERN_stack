@@ -14,3 +14,13 @@ server.on('error', (error) => {
   console.error('Failed to start server:', error);
   process.exitCode = 1;
 });
+
+const shutdown = () => {
+  console.log('Shutting down...');
+  server.close(async () => {
+    // await redis.quit();   // uncomment, using your redis client
+    process.exit(0);
+  });
+};
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
