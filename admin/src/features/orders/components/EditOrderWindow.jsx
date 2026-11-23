@@ -128,9 +128,10 @@ function EditOrderWindow({ order, disabled = false }) {
       {
         onSuccess: () => setOpen(false),
         onError: (error) => {
+          const fieldErrors = Object.values(error?.fieldErrors ?? {}).filter(Boolean);
           setErrors((previous) => ({
             ...previous,
-            form: error?.message ?? "Failed to update order information.",
+            form: fieldErrors.join(" ") || error?.message || "Failed to update order information.",
           }));
         },
       },
