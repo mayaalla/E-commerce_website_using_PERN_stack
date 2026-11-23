@@ -17,133 +17,27 @@ import {
 } from "@/components/ui/carousel";
 import { addToCart } from "@/lib/cart-store";
 import {
-  getProductStock,
+  getProductTotalStock,
   isProductOutOfStock,
   type Product,
+  type ProductColor,
   type ProductStock,
 } from "@/lib/api";
 
 type ColorOption = {
   value: string;
   name: string;
-  hex: string | null;
+  hex: string;
   swatch: string;
 };
 
-const namedSwatches: Record<string, string> = {
-  black: "#000000",
-  white: "#ffffff",
-  red: "#ff0000",
-  blue: "#0000ff",
-  navy: "#000080",
-  green: "#008000",
-  yellow: "#ffff00",
-  pink: "#ffc0cb",
-  purple: "#800080",
-  orange: "#ffa500",
-  brown: "#a52a2a",
-  gray: "#808080",
-  grey: "#808080",
-  beige: "#f5f5dc",
-  cream: "#fffdd0",
-  ivory: "#fffff0",
-  burgundy: "#800020",
-  maroon: "#800000",
-  teal: "#008080",
-  turquoise: "#40e0d0",
-  olive: "#808000",
-  lime: "#00ff00",
-  coral: "#ff7f50",
-  lavender: "#e6e6fa",
-  mint: "#98ff98",
-  charcoal: "#36454f",
-  "sky blue": "#87ceeb",
-  "light blue": "#add8e6",
-  "dark blue": "#00008b",
-  "light gray": "#d3d3d3",
-  "dark gray": "#a9a9a9",
-  "dark grey": "#a9a9a9",
-  "off white": "#f8f8f0",
-};
-
-const knownHexNames: Record<string, string> = {
-  "#000": "Noir",
-  "#000000": "Noir",
-  "#fff": "Blanc",
-  "#ffffff": "Blanc",
-  "#f00": "Rouge",
-  "#ff0000": "Rouge",
-  "#00f": "Bleu",
-  "#0000ff": "Bleu",
-  "#008000": "Vert",
-  "#ffff00": "Jaune",
-  "#ffc0cb": "Rose",
-  "#800080": "Violet",
-  "#ffa500": "Orange",
-  "#a52a2a": "Marron",
-  "#808080": "Gris",
-  "#000080": "Bleu marine",
-  "#800020": "Bordeaux",
-};
-
-function isHexColor(value: string) {
-  return /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i.test(value);
-}
-
-function normalizeHex(hex: string) {
-  const value = hex.toLowerCase();
-  if (value.length === 4) {
-    return `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}`;
-  }
-  return value;
-}
-
-function parseColor(value: string): ColorOption {
-  let rawName = value.trim();
-  let explicitHex: string | null = null;
-
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (typeof parsed === "object" && parsed !== null) {
-      const record = parsed as {
-        name?: unknown;
-        colorName?: unknown;
-        hex?: unknown;
-        hexCode?: unknown;
-        code?: unknown;
-      };
-      if (typeof record.name === "string") rawName = record.name.trim();
-      else if (typeof record.colorName === "string") rawName = record.colorName.trim();
-      if (typeof record.hex === "string") explicitHex = record.hex;
-      else if (typeof record.hexCode === "string") explicitHex = record.hexCode;
-      else if (typeof record.code === "string") explicitHex = record.code;
-    }
-  } catch {
-    // The current API type is string[]; JSON strings are accepted as a
-    // compatibility shape when a color is serialized as { name, hex }.
-  }
-
-  const embeddedHex =
-    value.match(/#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})\b/i)?.[0] ?? null;
-  const candidateHex = explicitHex ?? embeddedHex;
-  const hexMatch = candidateHex && isHexColor(candidateHex) ? candidateHex : null;
-  const name = rawName
-    .replace(/#[\da-f]{3,4}(?:[\da-f]{2})?\b/gi, "")
-    .replace(/[()[\]{}:|—–-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const normalizedHex = hexMatch ? normalizeHex(hexMatch) : null;
-  const normalizedName = name.toLowerCase();
-
+function parseColor(color: ProductColor): ColorOption {
+  const hex = color.hex.trim().replace(/^#/, "").toUpperCase();
   return {
-    value,
-    name:
-      name || (normalizedHex ? knownHexNames[normalizedHex] : undefined) ||
-      `Couleur ${normalizedHex?.toUpperCase() ?? "choix"}`,
-    hex: normalizedHex,
-    swatch:
-      normalizedHex ?? namedSwatches[normalizedName] ??
-      (normalizedName.replace(/[^a-z]/g, "") || "#737373"),
+    value: hex,
+    name: color.name,
+    hex,
+    swatch: `#${hex}`,
   };
 }
 
@@ -175,7 +69,11 @@ export function ProductDetail({
   const [carouselApi, setCarouselApi] = useState<CarouselApi>();
   const [cartMessage, setCartMessage] = useState("");
   const colors = product.colors.map(parseColor);
-  const outOfStock = isProductOutOfStock(product);
+  const hasStockTrackedVariants = colors.length > 0 && product.sizes.length > 0;
+  const stockCount = hasStockTrackedVariants
+    ? getProductTotalStock(stockRows)
+    : null;
+  const outOfStock = isProductOutOfStock(product, stockRows);
   const currentPrice = priceFor(product);
   const hasPromo = currentPrice !== product.price;
   const needsSize = product.sizes.length > 0;
@@ -190,7 +88,7 @@ export function ProductDetail({
     ? colors.find((color) => color.value === selectedColor)?.hex?.replace(/^#/, "").toUpperCase()
     : undefined;
   const comboStock =
-    selectionComplete && (needsSize || needsColor) && stockRows !== null
+    selectionComplete && hasStockTrackedVariants && stockRows !== null
       ? stockRows
           .filter((row) => !selectedColorHex || row.colorHex.toUpperCase() === selectedColorHex)
           .filter((row) => !selectedSize || row.size === selectedSize)
@@ -208,10 +106,8 @@ export function ProductDetail({
     setCartMessage("");
   }, []);
 
-  const stockCount = getProductStock(product);
   const hasPositiveAvailability =
-    product.inStock === true || product.isInStock === true ||
-    (stockCount !== null && Number.isFinite(stockCount) && stockCount > 0);
+    stockCount !== null && Number.isFinite(stockCount) && stockCount > 0;
 
   // A null result preserves the existing fallback when variant stock cannot be checked.
   // Otherwise, variant stock comes from the server-loaded rows without another request.
@@ -221,7 +117,14 @@ export function ProductDetail({
   const canPurchase =
     !outOfStock &&
     selectionComplete &&
-    comboHasStock;
+    comboHasStock &&
+    (comboStock === null || quantity <= comboStock);
+
+  const availableQuantity = selectionComplete
+    ? comboStock ?? stockCount
+    : stockCount;
+  const selectedColorName =
+    colors.find((color) => color.value === selectedColor)?.name;
 
   const handleThumbnailClick = useCallback(
     (index: number) => {
@@ -248,7 +151,8 @@ export function ProductDetail({
       price: currentPrice,
       image: product.images[0] ?? null,
       size: selectedSize || undefined,
-      color: selectedColor || undefined,
+      color: selectedColorName,
+      colorHex: selectedColor || undefined,
       quantity,
     });
 
@@ -260,7 +164,7 @@ export function ProductDetail({
 
     const params = new URLSearchParams({ productId: String(product.id) });
     if (selectedSize) params.set("size", selectedSize);
-    if (selectedColor) params.set("color", selectedColor);
+    if (selectedColor) params.set("colorHex", selectedColor);
     params.set("quantity", String(quantity));
     router.push(`/checkout?${params.toString()}`);
   }
@@ -375,7 +279,7 @@ export function ProductDetail({
             <div className="mt-8 border-y border-border py-6">
               {outOfStock ? (
                 <p role="status" className="text-sm font-medium text-destructive">Rupture de stock</p>
-              ) : hasPositiveAvailability || (stockCount !== null && Number.isFinite(stockCount)) ? (
+              ) : hasPositiveAvailability || stockCount !== null ? (
                 <p role="status" className="text-sm font-medium">
                   {hasPositiveAvailability ? "En stock" : "Rupture de stock"}
                 </p>
@@ -439,7 +343,7 @@ export function ProductDetail({
                   <p className="text-sm font-medium">Quantité</p>
                   {stockCount !== null ? (
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {stockCount} disponible(s)
+                      {availableQuantity ?? stockCount} disponible(s)
                     </p>
                   ) : null}
                 </div>
@@ -468,10 +372,15 @@ export function ProductDetail({
                     size="icon"
                     className="size-11 rounded-none"
                     aria-label="Augmenter la quantité"
-                    disabled={outOfStock || (stockCount !== null && quantity >= stockCount)}
+                    disabled={
+                      outOfStock ||
+                      (availableQuantity !== null && quantity >= availableQuantity)
+                    }
                     onClick={() =>
                       setQuantity((current) =>
-                        stockCount === null ? current + 1 : Math.min(stockCount, current + 1),
+                        availableQuantity === null
+                          ? current + 1
+                          : Math.min(availableQuantity, current + 1),
                       )
                     }
                   >
@@ -486,6 +395,8 @@ export function ProductDetail({
                     ? `Choisissez ${needsSize && needsColor ? "une taille et une couleur" : needsSize ? "une taille" : "une couleur"} pour continuer.`
                     : typeof comboStock === "number" && comboStock === 0
                     ? "Cette combinaison taille/couleur est en rupture de stock."
+                    : typeof comboStock === "number" && quantity > comboStock
+                    ? `Il ne reste que ${comboStock} unité(s) pour cette combinaison.`
                     : null}
                 </p>
               ) : null}
