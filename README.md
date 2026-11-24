@@ -2,8 +2,8 @@
 
 A full-stack e-commerce project for a women's clothing shop, with a customer storefront, an admin dashboard, and a REST API.
 
-Admin live preview: [https://maison-admin.vercel.app](https://maison-admin.vercel.app) Test: admin/admin
-Shop live preview: [https://maison-shop.vercel.app](https://maison-shop.vercel.app)
+
+Shop live preview: [https://maison-phi-six.vercel.app](https://maison-phi-six.vercel.app)
 
 
 
